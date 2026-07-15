@@ -1,7 +1,7 @@
 # AWS Self-Service Deployment Platform
 
 An internal platform that lets developers provision approved AWS resources and deploy ECS
-workloads through a web UI — without writing CloudFormation themselves.
+workloads through a web UI - without writing CloudFormation themselves.
 
 Built from the prompt pack in [.claude/](.claude/README%20(1).md) (v2.1). This repo is the
 **platform monorepo**; resource templates live in a separate `platform-templates` repo
