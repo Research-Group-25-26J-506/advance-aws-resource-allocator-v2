@@ -42,6 +42,12 @@ jobs:
           role-session-name: ${{ github.actor }}-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Seed template registry
+        run: |
+          BUCKET=$(aws ssm get-parameter --name /platform/dev/templates-bucket --query 'Parameter.Value' --output text)
+          # Interim publisher until the sync pipeline (3.09) lands: versions are immutable, so
+          # sync without --delete and never overwrite existing version prefixes.
+          aws s3 sync templates/ "s3://${BUCKET}/templates/" --size-only
       - name: Deploy stacks in order
         run: |
           set -euo pipefail

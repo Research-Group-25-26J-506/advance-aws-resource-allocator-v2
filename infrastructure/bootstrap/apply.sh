@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# One-time (idempotent) bootstrap apply. Usage: ./apply.sh <env> <github-org> [repo]
+# One-time (idempotent) bootstrap apply. Usage: ./apply.sh <env> <github-org> [repo] [deploy-branch]
 set -euo pipefail
+export MSYS_NO_PATHCONV=1   # Git Bash on Windows: stop mangling /platform/... into C:/...
 
 ENV="${1:?Usage: apply.sh <dev|stg|prod> <github-org> [repo] [deploy-branch]}"
 ORG="${2:?Usage: apply.sh <dev|stg|prod> <github-org> [repo] [deploy-branch]}"
