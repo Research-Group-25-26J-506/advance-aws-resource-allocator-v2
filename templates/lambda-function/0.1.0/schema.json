@@ -13,7 +13,7 @@
     "runtime": {
       "type": "string",
       "title": "Runtime",
-      "enum": ["python3.12", "nodejs20.x"],
+      "enum": ["python3.12", "nodejs22.x"],
       "default": "python3.12"
     },
     "memorySize": {

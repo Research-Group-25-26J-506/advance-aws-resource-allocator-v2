@@ -9,7 +9,7 @@ Parameters:
     AllowedPattern: "^[a-zA-Z0-9-_]{1,64}$"
   Runtime:
     Type: String
-    AllowedValues: [python3.12, nodejs20.x]
+    AllowedValues: [python3.12, nodejs22.x]
     Default: python3.12
   MemorySize:
     Type: Number

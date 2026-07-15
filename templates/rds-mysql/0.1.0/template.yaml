@@ -46,7 +46,7 @@ Resources:
     Properties:
       DBInstanceIdentifier: !Ref DbIdentifier
       Engine: mysql
-      EngineVersion: "8.0.40"
+      EngineVersion: "8.4.5"
       DBInstanceClass: !Ref InstanceClass
       AllocatedStorage: !Ref AllocatedStorageGb
       StorageType: gp3
