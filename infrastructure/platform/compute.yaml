@@ -21,6 +21,14 @@ Parameters:
     Type: String
     Default: ""
     Description: ACM certificate for HTTPS. Empty = HTTP-only listener (dev sandbox only).
+  # Fn::Split can't consume {{resolve:ssm:...}} strings, so subnet lists arrive via SSM
+  # parameter TYPES — the deploy workflow overrides the parameter name per environment.
+  PublicSubnetsParam:
+    Type: AWS::SSM::Parameter::Value<List<String>>
+    Default: /platform/dev/network/public-subnets
+  AppSubnetsParam:
+    Type: AWS::SSM::Parameter::Value<List<String>>
+    Default: /platform/dev/network/app-subnets
 
 Conditions:
   IsProdScale: !Equals [!Ref Scale, prod]
@@ -44,9 +52,7 @@ Resources:
       Type: application
       SecurityGroups:
         - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-alb}}"
-      Subnets: !Split
-        - ","
-        - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/public-subnets}}"
+      Subnets: !Ref PublicSubnetsParam
       LoadBalancerAttributes:
         - { Key: idle_timeout.timeout_seconds, Value: "120" }   # SSE > 60s default
         - { Key: routing.http.drop_invalid_header_fields.enabled, Value: "true" }
@@ -125,13 +131,19 @@ Resources:
   # ---------------------------------------------------------------- Log groups
   ApiLogGroup:
     Type: AWS::Logs::LogGroup
-    Properties: { LogGroupName: !Sub /platform/${EnvironmentName}/api, RetentionInDays: 30 }
+    Properties:
+      LogGroupName: !Sub /platform/${EnvironmentName}/api
+      RetentionInDays: 30
   WorkerLogGroup:
     Type: AWS::Logs::LogGroup
-    Properties: { LogGroupName: !Sub /platform/${EnvironmentName}/worker, RetentionInDays: 30 }
+    Properties:
+      LogGroupName: !Sub /platform/${EnvironmentName}/worker
+      RetentionInDays: 30
   WebLogGroup:
     Type: AWS::Logs::LogGroup
-    Properties: { LogGroupName: !Sub /platform/${EnvironmentName}/web-ui, RetentionInDays: 30 }
+    Properties:
+      LogGroupName: !Sub /platform/${EnvironmentName}/web-ui
+      RetentionInDays: 30
 
   # -------------------------------------------------------------------- Roles
   ExecutionRole:
@@ -222,7 +234,7 @@ Resources:
               - Sid: AssumeExecRoles
                 Effect: Allow
                 Action: sts:AssumeRole
-                Resource: !Sub arn:aws:iam::*:role/platform-exec-*
+                Resource: arn:aws:iam::*:role/platform-exec-*
               - Sid: Locks
                 Effect: Allow
                 Action: [dynamodb:PutItem, dynamodb:GetItem, dynamodb:DeleteItem, dynamodb:UpdateItem]
@@ -256,7 +268,7 @@ Resources:
       NetworkMode: awsvpc
       ExecutionRoleArn: !GetAtt ExecutionRole.Arn
       TaskRoleArn: !GetAtt ApiTaskRole.Arn
-      RuntimePlatform: { CpuArchitecture: ARM64, OperatingSystemFamily: LINUX }
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
       ContainerDefinitions:
         - Name: api
           Image: !Sub
@@ -268,6 +280,17 @@ Resources:
             - { Name: SPRING_PROFILES_ACTIVE, Value: !Ref EnvironmentName }
             - { Name: PLATFORM_ENV, Value: !Ref EnvironmentName }
             - { Name: OTEL_EXPORTER_OTLP_ENDPOINT, Value: http://localhost:4317 }
+            - { Name: AWS_REGION, Value: !Ref AWS::Region }
+            - { Name: PLATFORM_DB_HOST, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/db/proxy-endpoint}}" }
+            - { Name: PLATFORM_REQUESTS_QUEUE_URL, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/sqs/requests-queue-url}}" }
+            - { Name: PLATFORM_TEMPLATES_BUCKET, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/templates-bucket}}" }
+            - { Name: PLATFORM_IDEMPOTENCY_TABLE, Value: !Sub "platform-idempotency-${EnvironmentName}" }
+            - { Name: PLATFORM_COGNITO_ISSUER, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/auth/issuer-uri}}" }
+          Secrets:
+            - Name: PLATFORM_DB_USER
+              ValueFrom: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/db/secret-arn}}:username::"
+            - Name: PLATFORM_DB_PASSWORD
+              ValueFrom: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/db/secret-arn}}:password::"
           StopTimeout: 30
           LogConfiguration:
             LogDriver: awslogs
@@ -284,7 +307,7 @@ Resources:
           Essential: false
           Environment:
             - Name: AOT_CONFIG_CONTENT
-              Value: !Sub "{{resolve:ssm:/platform/otel/sidecar/config}}"
+              Value: "{{resolve:ssm:/platform/otel/sidecar/config}}"
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -302,7 +325,7 @@ Resources:
       NetworkMode: awsvpc
       ExecutionRoleArn: !GetAtt ExecutionRole.Arn
       TaskRoleArn: !GetAtt WorkerTaskRole.Arn
-      RuntimePlatform: { CpuArchitecture: ARM64, OperatingSystemFamily: LINUX }
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
       ContainerDefinitions:
         - Name: worker
           Image: !Sub
@@ -313,6 +336,15 @@ Resources:
             - { Name: SPRING_PROFILES_ACTIVE, Value: !Ref EnvironmentName }
             - { Name: PLATFORM_ENV, Value: !Ref EnvironmentName }
             - { Name: OTEL_EXPORTER_OTLP_ENDPOINT, Value: http://localhost:4317 }
+            - { Name: AWS_REGION, Value: !Ref AWS::Region }
+            - { Name: PLATFORM_DB_HOST, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/db/proxy-endpoint}}" }
+            - { Name: PLATFORM_REQUESTS_QUEUE_URL, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/sqs/requests-queue-url}}" }
+            - { Name: PLATFORM_TEMPLATES_BUCKET, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/templates-bucket}}" }
+          Secrets:
+            - Name: PLATFORM_DB_USER
+              ValueFrom: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/db/secret-arn}}:username::"
+            - Name: PLATFORM_DB_PASSWORD
+              ValueFrom: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/db/secret-arn}}:password::"
           StopTimeout: 120   # graceful drain of in-flight SQS handlers (3.4)
           LogConfiguration:
             LogDriver: awslogs
@@ -325,7 +357,7 @@ Resources:
           Essential: false
           Environment:
             - Name: AOT_CONFIG_CONTENT
-              Value: !Sub "{{resolve:ssm:/platform/otel/sidecar/config}}"
+              Value: "{{resolve:ssm:/platform/otel/sidecar/config}}"
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -343,7 +375,7 @@ Resources:
       NetworkMode: awsvpc
       ExecutionRoleArn: !GetAtt ExecutionRole.Arn
       TaskRoleArn: !GetAtt WebTaskRole.Arn
-      RuntimePlatform: { CpuArchitecture: ARM64, OperatingSystemFamily: LINUX }
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
       ContainerDefinitions:
         - Name: web-ui
           Image: !Sub
@@ -377,9 +409,8 @@ Resources:
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
-          Subnets: !Split
-            - ","
-            - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/app-subnets}}"
+          Subnets: !Ref AppSubnetsParam
+
           SecurityGroups:
             - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-ecs}}"
       LoadBalancers:
@@ -400,9 +431,8 @@ Resources:
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
-          Subnets: !Split
-            - ","
-            - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/app-subnets}}"
+          Subnets: !Ref AppSubnetsParam
+
           SecurityGroups:
             - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-ecs}}"
       LoadBalancers:
@@ -421,9 +451,8 @@ Resources:
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
-          Subnets: !Split
-            - ","
-            - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/app-subnets}}"
+          Subnets: !Ref AppSubnetsParam
+
           SecurityGroups:
             - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-ecs}}"
 

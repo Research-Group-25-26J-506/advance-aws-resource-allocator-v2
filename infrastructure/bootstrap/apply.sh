@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# One-time (idempotent) bootstrap apply. Usage: ./apply.sh <env> <github-org> [repo]
+# One-time (idempotent) bootstrap apply. Usage: ./apply.sh <env> <github-org> [repo] [deploy-branch]
 set -euo pipefail
+export MSYS_NO_PATHCONV=1   # Git Bash on Windows: stop mangling /platform/... into C:/...
 
-ENV="${1:?Usage: apply.sh <dev|stg|prod> <github-org> [repo]}"
-ORG="${2:?Usage: apply.sh <dev|stg|prod> <github-org> [repo]}"
+ENV="${1:?Usage: apply.sh <dev|stg|prod> <github-org> [repo] [deploy-branch]}"
+ORG="${2:?Usage: apply.sh <dev|stg|prod> <github-org> [repo] [deploy-branch]}"
 REPO="${3:-platform}"
+BRANCH="${4:-develop}"
 STACK="platform-bootstrap-${ENV}"
 
 aws cloudformation deploy \
@@ -15,7 +17,8 @@ aws cloudformation deploy \
   --parameter-overrides \
     "EnvironmentName=${ENV}" \
     "GitHubOrg=${ORG}" \
-    "GitHubRepo=${REPO}"
+    "GitHubRepo=${REPO}" \
+    "DeployBranch=${BRANCH}"
 
 echo ""
 echo "Bootstrap applied. SSM parameters written under /platform/${ENV}/:"

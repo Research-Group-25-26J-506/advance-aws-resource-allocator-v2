@@ -68,5 +68,26 @@ public class StubStackLauncher implements StackLauncher {
     @Override
     public void deleteStack(String stackId, String executionRoleArn, Environment env, String region) {
         log.info("[stub] DeleteStack {}", stackId);
+        // Real AWS: the EventBridge listener flips DELETE_IN_PROGRESS -> DELETE_COMPLETE.
+        // Locally we simulate it, same as create.
+        scheduler.schedule(() -> completeDelete(stackId), 5, TimeUnit.SECONDS);
+    }
+
+    private void completeDelete(String stackId) {
+        requests.findByStackId(stackId).ifPresent(request -> {
+            if (request.status() != RequestStatus.DELETE_IN_PROGRESS) {
+                return;
+            }
+            request.transitionTo(RequestStatus.DELETE_COMPLETE);
+            requests.save(request);
+            requests.appendEvent(
+                    request.id(),
+                    RequestStatus.DELETE_IN_PROGRESS,
+                    RequestStatus.DELETE_COMPLETE,
+                    "[stub] stack deletion simulated",
+                    "CLOUDFORMATION",
+                    Instant.now());
+            log.info("[stub] Request {} -> DELETE_COMPLETE", request.id());
+        });
     }
 }

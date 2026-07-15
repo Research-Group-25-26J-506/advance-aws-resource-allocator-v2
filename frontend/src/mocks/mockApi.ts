@@ -26,6 +26,30 @@ const templates: Template[] = [
     maturity: "beta",
     latestVersion: "0.1.0",
   },
+  {
+    id: "sns-topic",
+    displayName: "SNS Topic",
+    description: "Encrypted SNS topic, standard or FIFO, TLS-only publishing.",
+    category: "Integration",
+    maturity: "beta",
+    latestVersion: "0.1.0",
+  },
+  {
+    id: "lambda-function",
+    displayName: "Lambda Function",
+    description: "Lambda scaffold with least-privilege role and log retention.",
+    category: "Compute",
+    maturity: "beta",
+    latestVersion: "0.1.0",
+  },
+  {
+    id: "rds-mysql",
+    displayName: "RDS MySQL",
+    description: "MySQL 8 in private data subnets with managed master password.",
+    category: "Database",
+    maturity: "beta",
+    latestVersion: "0.1.0",
+  },
 ];
 
 const s3Schema = {

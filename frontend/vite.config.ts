@@ -8,7 +8,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": {
-        target: "http://localhost:8080",
+        target: "http://localhost:8090", // api's `local` profile port (8080 clashes with wslrelay)
         changeOrigin: true,
       },
     },

@@ -1,10 +1,8 @@
-# Default owners for anything not matched below
-*                   @your-org/platform-team
+# Personal repo: single owner. Swap to team handles (@org/platform-team etc.) when this moves
+# to an organisation (7.01 layout kept as comments for that day).
+*                   @it22323934
 
-# Per-directory ownership (7.01)
-/infrastructure/    @your-org/platform-team
-/backend/           @your-org/backend-team
-/frontend/          @your-org/frontend-team
-/templates/         @your-org/template-admins
-/.github/           @your-org/platform-team
-/docs/adr/          @your-org/platform-team
+# /infrastructure/  @your-org/platform-team
+# /backend/         @your-org/backend-team
+# /frontend/        @your-org/frontend-team
+# /templates/       @your-org/template-admins

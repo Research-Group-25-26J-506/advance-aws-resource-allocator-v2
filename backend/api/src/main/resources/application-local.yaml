@@ -1,4 +1,7 @@
 # Local profile: docker-compose stack (dev/docker-compose.yaml). Auth = dev-header bypass.
+server:
+  port: 8090   # 8080 is commonly squatted by Docker Desktop's wslrelay on Windows
+
 spring:
   datasource:
     url: jdbc:mysql://localhost:3306/platform

@@ -3,7 +3,6 @@ package app.platform.api.request;
 import app.platform.api.request.RequestDtos.CreateRequestPayload;
 import app.platform.api.request.RequestDtos.RequestDto;
 import app.platform.api.request.RequestDtos.RequestEventDto;
-import app.platform.persistence.repo.SpringDataRepos;
 import jakarta.validation.Valid;
 import java.net.URI;
 import java.util.List;
@@ -35,11 +34,9 @@ public class RequestController {
     private final ScheduledExecutorService ssePool = Executors.newScheduledThreadPool(2);
 
     private final RequestService service;
-    private final SpringDataRepos.RequestEvents events;
 
-    public RequestController(RequestService service, SpringDataRepos.RequestEvents events) {
+    public RequestController(RequestService service) {
         this.service = service;
-        this.events = events;
     }
 
     @PostMapping
@@ -83,10 +80,13 @@ public class RequestController {
     @GetMapping("/{id}/events")
     @PreAuthorize("isAuthenticated()")
     public List<RequestEventDto> listEvents(@PathVariable UUID id) {
-        service.get(id); // 404 if unknown
-        return events.findByRequestIdOrderByOccurredAtAsc(id).stream()
+        return service.listEvents(id).stream()
                 .map(e -> new RequestEventDto(
-                        e.getFromStatus(), e.getToStatus(), e.getReason(), e.getSource(), e.getOccurredAt()))
+                        e.from() == null ? null : e.from().name(),
+                        e.to().name(),
+                        e.reason(),
+                        e.source(),
+                        e.occurredAt()))
                 .toList();
     }
 

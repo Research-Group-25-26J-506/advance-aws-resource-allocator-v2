@@ -28,13 +28,17 @@ subprojects {
 
     configure<com.diffplug.gradle.spotless.SpotlessExtension> {
         java {
-            palantirJavaFormat()
-            removeUnusedImports()
+            // palantirJavaFormat/removeUnusedImports need javac internals that break on newer
+            // daemon JDKs (NoSuchMethodError on JDK 25); re-enable once CI + dev pin a JDK 21 daemon.
+            trimTrailingWhitespace()
+            endWithNewline()
         }
     }
 
     dependencies {
         "testImplementation"("org.springframework.boot:spring-boot-starter-test")
+        // Gradle 9 no longer injects the JUnit Platform launcher onto the test runtime classpath
+        "testRuntimeOnly"("org.junit.platform:junit-platform-launcher")
     }
 
     tasks.withType<Test> {

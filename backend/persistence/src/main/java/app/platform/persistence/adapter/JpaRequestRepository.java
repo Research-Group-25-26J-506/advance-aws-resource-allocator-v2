@@ -2,6 +2,7 @@ package app.platform.persistence.adapter;
 
 import app.platform.domain.model.Environment;
 import app.platform.domain.model.Request;
+import app.platform.domain.model.RequestEvent;
 import app.platform.domain.model.RequestStatus;
 import app.platform.domain.port.RequestRepository;
 import app.platform.persistence.entity.RequestEntity;
@@ -48,6 +49,12 @@ public class JpaRequestRepository implements RequestRepository {
 
     @Override
     @Transactional(readOnly = true)
+    public Optional<Request> findByStackId(String stackId) {
+        return requests.findByStackId(stackId).map(this::toDomain);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<Request> findByRequester(String requesterId, int limit) {
         return requests.findByRequesterIdOrderBySubmittedAtDesc(requesterId, PageRequest.of(0, limit)).stream()
                 .map(this::toDomain)
@@ -59,6 +66,19 @@ public class JpaRequestRepository implements RequestRepository {
     public void appendEvent(
             UUID requestId, RequestStatus from, RequestStatus to, String reason, String source, Instant at) {
         events.save(new RequestEventEntity(requestId, from == null ? null : from.name(), to.name(), reason, source, at));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<RequestEvent> listEvents(UUID requestId) {
+        return events.findByRequestIdOrderByOccurredAtAsc(requestId).stream()
+                .map(e -> new RequestEvent(
+                        e.getFromStatus() == null ? null : RequestStatus.valueOf(e.getFromStatus()),
+                        RequestStatus.valueOf(e.getToStatus()),
+                        e.getReason(),
+                        e.getSource(),
+                        e.getOccurredAt()))
+                .toList();
     }
 
     private RequestEntity toEntity(Request r) {

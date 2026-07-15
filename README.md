@@ -43,7 +43,7 @@ Prereqs: Docker, JDK 21, Node 20+, pnpm (or npm).
 cd dev && make up          # MySQL + LocalStack + observability stack
 cd backend && ./gradlew :api:bootRun --args='--spring.profiles.active=local'
 cd backend && ./gradlew :worker:bootRun --args='--spring.profiles.active=local'
-cd frontend && npm install && npm run dev   # http://localhost:5173, proxies /api → :8080
+cd frontend && npm install && npm run dev   # http://localhost:5173, proxies /api → :8090
 ```
 
 The `local` Spring profile uses a dev-header auth bypass (compiled out of prod builds) and a

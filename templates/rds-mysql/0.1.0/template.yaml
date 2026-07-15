@@ -1,0 +1,67 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Platform-managed RDS MySQL 8 instance — encrypted, RDS-managed master password in Secrets
+  Manager, deployed into the platform's private data subnets.
+
+Parameters:
+  DbIdentifier:
+    Type: String
+    AllowedPattern: "^[a-z][a-z0-9-]{0,62}$"
+  InstanceClass:
+    Type: String
+    AllowedValues: [db.t4g.micro, db.t4g.small, db.t4g.medium]
+    Default: db.t4g.micro
+  AllocatedStorageGb:
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 1000
+  DatabaseName:
+    Type: String
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]{0,63}$"
+    Default: app
+  MultiAz:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+  # Platform wiring — resolved from SSM, not user-facing (defaults target dev)
+  DataSubnetsParam:
+    Type: AWS::SSM::Parameter::Value<List<String>>
+    Default: /platform/dev/network/data-subnets
+
+Conditions:
+  IsMultiAz: !Equals [!Ref MultiAz, "true"]
+
+Resources:
+  SubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub Data subnets for ${DbIdentifier}
+      SubnetIds: !Ref DataSubnetsParam
+
+  Instance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Ref DbIdentifier
+      Engine: mysql
+      EngineVersion: "8.4.5"
+      DBInstanceClass: !Ref InstanceClass
+      AllocatedStorage: !Ref AllocatedStorageGb
+      StorageType: gp3
+      StorageEncrypted: true
+      DBName: !Ref DatabaseName
+      MasterUsername: dbadmin
+      ManageMasterUserPassword: true   # RDS-managed secret; no plaintext anywhere
+      MultiAZ: !If [IsMultiAz, true, false]
+      DBSubnetGroupName: !Ref SubnetGroup
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 7
+      AutoMinorVersionUpgrade: true
+      CopyTagsToSnapshot: true
+
+Outputs:
+  Endpoint: { Value: !GetAtt Instance.Endpoint.Address }
+  Port: { Value: !GetAtt Instance.Endpoint.Port }
+  MasterSecretArn: { Value: !GetAtt Instance.MasterUserSecret.SecretArn }

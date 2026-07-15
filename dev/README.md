@@ -12,8 +12,16 @@ cd backend && gradle :api:bootRun --args='--spring.profiles.active=local'
 # Terminal 3 — worker
 cd backend && gradle :worker:bootRun --args='--spring.profiles.active=local'
 
-# Terminal 4 — frontend (proxies /api → :8080)
+# Terminal 4 — frontend (proxies /api → :8090)
 cd frontend && npm install && npm run dev
+```
+
+Local ports: api **8090** (8080 is often held by Docker Desktop's wslrelay on Windows),
+worker actuator **8082**, frontend **5173**. Quick checks once up:
+
+```powershell
+curl http://localhost:8090/actuator/health     # {"status":"UP"}
+curl http://localhost:8090/api/v1/templates    # 6 seeded templates
 ```
 
 Open http://localhost:5173. The `local` profile uses a **dev-header auth bypass**

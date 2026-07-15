@@ -1,0 +1,25 @@
+{
+  "manifestSchemaVersion": 1,
+  "templateId": "lambda-function",
+  "version": "0.1.0",
+  "category": "Compute",
+  "displayName": "Lambda Function",
+  "description": "Lambda scaffold with a least-privilege execution role, 30-day log retention, and placeholder code — wire your CI to deploy the real artifact.",
+  "renderMode": "parameter",
+  "parameterMap": {
+    "functionName": "FunctionName",
+    "runtime": "Runtime",
+    "memorySize": "MemorySize",
+    "timeoutSeconds": "TimeoutSeconds"
+  },
+  "maturity": "beta",
+  "owners": ["platform-team"],
+  "defaultsByEnv": {
+    "dev": { "memorySize": 256 }
+  },
+  "estimatedMonthlyCost": "~$0 at low volume (1M free requests/month)",
+  "cfnCapabilities": ["CAPABILITY_IAM"],
+  "examples": [
+    { "functionName": "orders-enricher", "runtime": "python3.12", "memorySize": 512, "timeoutSeconds": 60 }
+  ]
+}

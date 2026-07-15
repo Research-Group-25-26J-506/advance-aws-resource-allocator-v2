@@ -1,5 +1,6 @@
 # Java / Gradle
 backend/**/build/
+backend/**/bin/
 backend/.gradle/
 *.class
 *.jar

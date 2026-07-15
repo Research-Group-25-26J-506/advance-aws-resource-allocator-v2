@@ -44,7 +44,7 @@ paths:
         "202":
           description: Accepted; poll Location or subscribe to the SSE stream
           headers:
-            Location: { schema: { type: string }, description: /api/v1/requests/{id} }
+            Location: { schema: { type: string }, description: "/api/v1/requests/{id}" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Request" }
@@ -81,7 +81,7 @@ paths:
                     status: CREATE_COMPLETE
                     requesterEmail: dev@example.com
                     submittedAt: "2026-07-15T09:30:00Z"
-                next_cursor: null
+                next_cursor: "0190a1b2-7d3e-7000-8000-3fb1c0ffee00"
 
   /requests/{id}:
     parameters:
@@ -130,7 +130,7 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/RequestEvent" }
               example:
-                - { from: null, to: PENDING_VALIDATION, reason: Submitted, source: PLATFORM, occurredAt: "2026-07-15T09:30:00Z" }
+                - { to: PENDING_VALIDATION, reason: Submitted, source: PLATFORM, occurredAt: "2026-07-15T09:30:00Z" }
                 - { from: PENDING_VALIDATION, to: QUEUED, reason: Validation passed, source: PLATFORM, occurredAt: "2026-07-15T09:30:01Z" }
             text/event-stream:
               schema: { type: string }
