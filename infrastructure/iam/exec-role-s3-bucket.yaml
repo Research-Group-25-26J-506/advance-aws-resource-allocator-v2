@@ -1,0 +1,67 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Per-template execution role for s3-bucket (3.06). The worker STS-assumes this to run
+  CloudFormation — the role can do exactly what the template needs, nothing more.
+  Pattern: one platform-exec-<templateId> role per template, deployed with the iam stack.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [dev, stg, prod]
+  WorkerRoleArn:
+    Type: String
+    Description: ARN of the worker task role allowed to assume this
+  ExternalId:
+    Type: String
+    Default: ""
+    Description: Required for cross-account assumption (phase 4); empty in-account
+
+Conditions:
+  HasExternalId: !Not [!Equals [!Ref ExternalId, ""]]
+
+Resources:
+  ExecRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-exec-s3-bucket-${EnvironmentName}
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { AWS: !Ref WorkerRoleArn }
+            Action: sts:AssumeRole
+            Condition: !If
+              - HasExternalId
+              - StringEquals: { "sts:ExternalId": !Ref ExternalId }
+              - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: s3-bucket-lifecycle
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ManageBuckets
+                Effect: Allow
+                Action:
+                  - s3:CreateBucket
+                  - s3:DeleteBucket
+                  - s3:PutBucketVersioning
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:PutEncryptionConfiguration
+                  - s3:PutLifecycleConfiguration
+                  - s3:PutBucketPolicy
+                  - s3:DeleteBucketPolicy
+                  - s3:PutBucketTagging
+                  - s3:GetBucket*
+                  - s3:ListBucket
+                Resource: "arn:aws:s3:::*"
+
+  SsmExecRoleArn:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/exec-roles/s3-bucket
+      Type: String
+      Value: !GetAtt ExecRole.Arn
+
+Outputs:
+  ExecRoleArn: { Value: !GetAtt ExecRole.Arn }

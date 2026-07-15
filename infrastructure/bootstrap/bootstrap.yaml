@@ -1,0 +1,348 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Platform bootstrap (6.01). Applied once, manually, before anything else exists.
+  S3 buckets, ECR, GitHub OIDC provider, CI roles. All outputs published to SSM under
+  /platform/{env}/... so every downstream stack is account-agnostic.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [dev, stg, prod]
+    Default: dev
+  GitHubOrg:
+    Type: String
+    Description: GitHub organisation that owns the platform repo
+  GitHubRepo:
+    Type: String
+    Default: platform
+    Description: Repository name for OIDC trust conditions
+
+Conditions:
+  IsProd: !Equals [!Ref EnvironmentName, prod]
+
+Resources:
+
+  # ---------------------------------------------------------------- S3 buckets
+  TemplatesBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub platform-templates-${AWS::AccountId}-${EnvironmentName}
+      VersioningConfiguration: { Status: Enabled }   # template versions are immutable; keep all
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: aws:kms, KMSMasterKeyID: alias/aws/s3 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  TemplatesBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref TemplatesBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt TemplatesBucket.Arn
+              - !Sub "${TemplatesBucket.Arn}/*"
+            Condition: { Bool: { "aws:SecureTransport": "false" } }
+          # Only the sync path may publish template objects — humans and CI go through it.
+          - Sid: DenyPutExceptSyncPath
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource: !Sub "${TemplatesBucket.Arn}/*"
+            Condition:
+              StringNotLike:
+                aws:PrincipalArn:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/platform-${EnvironmentName}-worker-task-role
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/platform-${EnvironmentName}-sync-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/platform-ci-deploy-role-${EnvironmentName}
+
+  CfnUploadsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub platform-cfn-uploads-${AWS::AccountId}-${EnvironmentName}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-rendered-bodies
+            Status: Enabled
+            ExpirationInDays: 30
+
+  BuildMetadataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub platform-build-metadata-${AWS::AccountId}-${EnvironmentName}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-build-metadata
+            Status: Enabled
+            ExpirationInDays: 90
+
+  LokiBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub platform-observability-loki-${AWS::AccountId}-${EnvironmentName}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: logs-to-glacier
+            Status: Enabled
+            Transitions: [{ StorageClass: GLACIER, TransitionInDays: 90 }]
+
+  TempoBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub platform-observability-tempo-${AWS::AccountId}-${EnvironmentName}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: traces-to-glacier
+            Status: Enabled
+            Transitions: [{ StorageClass: GLACIER, TransitionInDays: 90 }]
+
+  # -------------------------------------------------------------------- ECR
+  ImagesRepo:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: !Sub platform-images-${EnvironmentName}
+      ImageScanningConfiguration: { ScanOnPush: true }
+      ImageTagMutability: IMMUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 20 tagged images",
+                "selection": {
+                  "tagStatus": "tagged",
+                  "tagPatternList": ["*"],
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 20
+                },
+                "action": { "type": "expire" }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Expire untagged after 7 days",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": 7
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+
+  # ------------------------------------------------------- GitHub OIDC + roles
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+      # GitHub rotates thumbprints; AWS validates against its trusted CA set for this provider,
+      # but the property is required. Known-good root thumbprint:
+      ThumbprintList: [6938fd4d98bab03faadb97b34396831e3780aea1]
+
+  CiDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-ci-deploy-role-${EnvironmentName}
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Federated: !Ref GitHubOidcProvider }
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !If
+                  - IsProd
+                  # prod deploys only from jobs inside the protected environment
+                  - !Sub repo:${GitHubOrg}/${GitHubRepo}:environment:platform-prod
+                  - !Sub repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/main
+      Policies:
+        - PolicyName: deploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CloudFormation
+                Effect: Allow
+                Action: [cloudformation:*]
+                Resource: !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/platform-*
+              - Sid: PassExecRoles
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/platform-*
+              - Sid: DeployTouchpoints
+                Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:DescribeImages
+                  - ecs:UpdateService
+                  - ecs:DescribeServices
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                  - ssm:PutParameter
+                Resource: "*"
+              - Sid: StackServiceRoles
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:TagRole
+                  - iam:UntagRole
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/platform-*
+
+  CiPlanRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-ci-plan-role-${EnvironmentName}
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Federated: !Ref GitHubOidcProvider }
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOrg}/${GitHubRepo}:pull_request
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+      Policies:
+        - PolicyName: plan-changesets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:DeleteChangeSet
+                Resource: !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/platform-*
+
+  # ------------------------------------------------ SSM wiring (portability)
+  SsmTemplatesBucket:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/templates-bucket
+      Type: String
+      Value: !Ref TemplatesBucket
+
+  SsmCfnUploadsBucket:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/cfn-uploads-bucket
+      Type: String
+      Value: !Ref CfnUploadsBucket
+
+  SsmBuildMetadataBucket:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/build-metadata-bucket
+      Type: String
+      Value: !Ref BuildMetadataBucket
+
+  SsmLokiBucket:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/observability/loki-bucket
+      Type: String
+      Value: !Ref LokiBucket
+
+  SsmTempoBucket:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/observability/tempo-bucket
+      Type: String
+      Value: !Ref TempoBucket
+
+  SsmEcrRepo:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/ecr-repo
+      Type: String
+      Value: !GetAtt ImagesRepo.RepositoryUri
+
+  SsmDeployRoleArn:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/deploy-role-arn
+      Type: String
+      Value: !GetAtt CiDeployRole.Arn
+
+Outputs:
+  TemplatesBucketName: { Value: !Ref TemplatesBucket }
+  EcrRepositoryUri: { Value: !GetAtt ImagesRepo.RepositoryUri }
+  CiDeployRoleArn: { Value: !GetAtt CiDeployRole.Arn }
+  CiPlanRoleArn: { Value: !GetAtt CiPlanRole.Arn }

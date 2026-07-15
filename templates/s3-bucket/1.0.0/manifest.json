@@ -1,0 +1,31 @@
+{
+  "manifestSchemaVersion": 1,
+  "templateId": "s3-bucket",
+  "version": "1.0.0",
+  "category": "Storage",
+  "displayName": "S3 Bucket",
+  "description": "Versioned, encrypted S3 bucket with Block Public Access enforced and TLS-only access.",
+  "renderMode": "parameter",
+  "parameterMap": {
+    "bucketName": "BucketName",
+    "versioning": "VersioningEnabled",
+    "storageClass": "StorageClass",
+    "expireAfterDays": "ExpireAfterDays"
+  },
+  "maturity": "stable",
+  "owners": ["platform-team"],
+  "defaultsByEnv": {
+    "dev": { "expireAfterDays": 30 },
+    "prod": { "versioning": true }
+  },
+  "estimatedMonthlyCost": "~$1 for 40GB STANDARD",
+  "cfnCapabilities": [],
+  "examples": [
+    {
+      "bucketName": "analytics-raw-data",
+      "versioning": true,
+      "storageClass": "STANDARD",
+      "expireAfterDays": 90
+    }
+  ]
+}

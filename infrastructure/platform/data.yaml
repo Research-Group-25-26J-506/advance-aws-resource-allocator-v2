@@ -1,0 +1,245 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Platform data tier (6.03). Aurora MySQL 8 (Serverless v2 in dev, provisioned Multi-AZ in prod),
+  RDS Proxy, SQS + DLQ, DynamoDB idempotency + lock tables. Wiring via SSM /platform/{env}/...
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [dev, stg, prod]
+  DbTier:
+    Type: String
+    AllowedValues: [serverless, provisioned]
+    Default: serverless
+    Description: serverless = v2 min 0.5 ACU single instance (dev); provisioned = Multi-AZ t4g.medium pair (~$120/mo)
+
+Conditions:
+  IsProvisioned: !Equals [!Ref DbTier, provisioned]
+  IsProd: !Equals [!Ref EnvironmentName, prod]
+
+Resources:
+
+  # ------------------------------------------------------------- Aurora MySQL 8
+  DbMasterSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/db/master
+      Description: Aurora master credentials (rotated every 90 days)
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "platform_admin"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: "\"@/\\'"
+
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Platform data subnets
+      SubnetIds: !Split
+        - ","
+        - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/data-subnets}}"
+
+  DbCluster:
+    Type: AWS::RDS::DBCluster
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      Engine: aurora-mysql
+      EngineVersion: "8.0.mysql_aurora.3.05.2"
+      DatabaseName: platform
+      MasterUsername: !Sub "{{resolve:secretsmanager:${DbMasterSecret}:SecretString:username}}"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DbMasterSecret}:SecretString:password}}"
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VpcSecurityGroupIds:
+        - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-rds}}"
+      BackupRetentionPeriod: 30
+      StorageEncrypted: true
+      DeletionProtection: !If [IsProd, true, false]
+      EnableCloudwatchLogsExports: [error, slowquery]
+      ServerlessV2ScalingConfiguration: !If
+        - IsProvisioned
+        - !Ref AWS::NoValue
+        - { MinCapacity: 0.5, MaxCapacity: 4 }
+
+  DbPrimary:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: aurora-mysql
+      DBClusterIdentifier: !Ref DbCluster
+      DBInstanceClass: !If [IsProvisioned, db.t4g.medium, db.serverless]
+      MonitoringInterval: !If [IsProvisioned, 30, 0]
+      MonitoringRoleArn: !If [IsProvisioned, !GetAtt EnhancedMonitoringRole.Arn, !Ref AWS::NoValue]
+      EnablePerformanceInsights: !If [IsProvisioned, true, false]
+      PubliclyAccessible: false
+
+  DbReader:
+    Type: AWS::RDS::DBInstance
+    Condition: IsProvisioned
+    Properties:
+      Engine: aurora-mysql
+      DBClusterIdentifier: !Ref DbCluster
+      DBInstanceClass: db.t4g.medium
+      MonitoringInterval: 30
+      MonitoringRoleArn: !GetAtt EnhancedMonitoringRole.Arn
+      EnablePerformanceInsights: true
+      PubliclyAccessible: false
+
+  EnhancedMonitoringRole:
+    Type: AWS::IAM::Role
+    Condition: IsProvisioned
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: monitoring.rds.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole
+
+  DbSecretAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId: !Ref DbMasterSecret
+      TargetId: !Ref DbCluster
+      TargetType: AWS::RDS::DBCluster
+
+  DbSecretRotation:
+    Type: AWS::SecretsManager::RotationSchedule
+    DependsOn: DbSecretAttachment
+    Properties:
+      SecretId: !Ref DbMasterSecret
+      HostedRotationLambda:
+        RotationType: MySQLSingleUser
+        VpcSecurityGroupIds: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-rds}}"
+        VpcSubnetIds: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/data-subnets}}"
+      RotationRules:
+        AutomaticallyAfterDays: 90
+
+  RdsProxyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: rds.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: read-db-secret
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref DbMasterSecret
+
+  RdsProxy:
+    Type: AWS::RDS::DBProxy
+    Properties:
+      DBProxyName: !Sub platform-${EnvironmentName}-proxy
+      EngineFamily: MYSQL
+      RoleArn: !GetAtt RdsProxyRole.Arn
+      Auth:
+        - { AuthScheme: SECRETS, SecretArn: !Ref DbMasterSecret, IAMAuth: DISABLED }
+      VpcSubnetIds: !Split
+        - ","
+        - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/data-subnets}}"
+      VpcSecurityGroupIds:
+        - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-rds}}"
+      RequireTLS: true
+
+  RdsProxyTargetGroup:
+    Type: AWS::RDS::DBProxyTargetGroup
+    DependsOn: DbPrimary
+    Properties:
+      DBProxyName: !Ref RdsProxy
+      TargetGroupName: default
+      DBClusterIdentifiers: [!Ref DbCluster]
+
+  # ---------------------------------------------------------------------- SQS
+  RequestsDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub platform-requests-dlq-${EnvironmentName}
+      MessageRetentionPeriod: 1209600   # 14 days
+      SqsManagedSseEnabled: true
+
+  RequestsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub platform-requests-${EnvironmentName}
+      # 5 min visibility: worker handlers cap at ~2 min for provision; long syncs extend via
+      # ChangeMessageVisibility heartbeat (3.4) rather than a bigger blanket timeout.
+      VisibilityTimeout: 300
+      MessageRetentionPeriod: 1209600
+      ReceiveMessageWaitTimeSeconds: 20
+      SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt RequestsDlq.Arn
+        maxReceiveCount: 5
+
+  # ------------------------------------------------------------------ DynamoDB
+  IdempotencyTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub platform-idempotency-${EnvironmentName}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{ AttributeName: pk, AttributeType: S }]
+      KeySchema: [{ AttributeName: pk, KeyType: HASH }]
+      TimeToLiveSpecification: { AttributeName: expires_at, Enabled: true }
+      # PITR on: this table stores response bodies
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+      SSESpecification: { SSEEnabled: true }
+
+  LocksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub platform-locks-${EnvironmentName}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{ AttributeName: name, AttributeType: S }]
+      KeySchema: [{ AttributeName: name, KeyType: HASH }]
+      TimeToLiveSpecification: { AttributeName: expires_at, Enabled: true }
+      SSESpecification: { SSEEnabled: true }
+
+  # ---------------------------------------------------------------- SSM wiring
+  SsmDbEndpoint:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/db/proxy-endpoint
+      Type: String
+      Value: !GetAtt RdsProxy.Endpoint
+  SsmDbSecretArn:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/db/secret-arn
+      Type: String
+      Value: !Ref DbMasterSecret
+  SsmRequestsQueueUrl:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/sqs/requests-queue-url
+      Type: String
+      Value: !Ref RequestsQueue
+  SsmRequestsQueueArn:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/sqs/requests-queue-arn
+      Type: String
+      Value: !GetAtt RequestsQueue.Arn
+  SsmIdempotencyTable:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/ddb/idempotency-table
+      Type: String
+      Value: !Ref IdempotencyTable
+  SsmLocksTable:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/ddb/locks-table
+      Type: String
+      Value: !Ref LocksTable
+
+Outputs:
+  ProxyEndpoint: { Value: !GetAtt RdsProxy.Endpoint }
+  RequestsQueueUrl: { Value: !Ref RequestsQueue }

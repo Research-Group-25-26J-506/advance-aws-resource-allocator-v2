@@ -1,0 +1,86 @@
+# Build & push images (7.04). OIDC only — no AWS keys. Push to a -candidate tag, scan, then
+# re-tag deployable on pass so a vulnerable tag is never deployable.
+name: build-images
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: build-images
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC federation (7.02)
+    strategy:
+      matrix:
+        service: [api, worker, web-ui]
+    steps:
+      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          role-to-assume: ${{ vars.CI_DEPLOY_ROLE_ARN }}
+          role-session-name: ${{ github.actor }}-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
+
+      - name: Resolve ECR repo from SSM
+        id: repo
+        run: |
+          REPO=$(aws ssm get-parameter --name /platform/dev/ecr-repo --query 'Parameter.Value' --output text)
+          echo "repo=$REPO" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
+
+      - name: Build backend jars
+        if: matrix.service != 'web-ui'
+        uses: actions/setup-java@b36c23c0d998641eff861008f374ee103c25ac73 # v4.4.0
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Gradle bootJar
+        if: matrix.service != 'web-ui'
+        working-directory: backend
+        run: gradle :${{ matrix.service }}:bootJar --no-daemon
+
+      - name: Build + push candidate image
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
+        with:
+          context: ${{ matrix.service == 'web-ui' && 'frontend' || 'backend' }}
+          file: ${{ matrix.service == 'web-ui' && 'frontend/Dockerfile' || format('backend/{0}/Dockerfile', matrix.service) }}
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.repo.outputs.repo }}:${{ matrix.service }}-${{ steps.repo.outputs.sha }}-candidate
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      - name: Scan candidate (fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # 0.28.0
+        with:
+          image-ref: ${{ steps.repo.outputs.repo }}:${{ matrix.service }}-${{ steps.repo.outputs.sha }}-candidate
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      - name: Promote candidate to deployable tag
+        run: |
+          docker buildx imagetools create \
+            --tag "${{ steps.repo.outputs.repo }}:${{ matrix.service }}-${{ steps.repo.outputs.sha }}" \
+            "${{ steps.repo.outputs.repo }}:${{ matrix.service }}-${{ steps.repo.outputs.sha }}-candidate"

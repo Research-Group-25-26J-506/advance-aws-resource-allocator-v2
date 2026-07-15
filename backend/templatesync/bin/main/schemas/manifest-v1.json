@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://platform.internal/schemas/manifest-v1.json",
+  "title": "Platform template manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifestSchemaVersion", "templateId", "version", "category", "displayName", "description", "renderMode"],
+  "properties": {
+    "manifestSchemaVersion": { "const": 1 },
+    "templateId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,63}$" },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "category": {
+      "type": "string",
+      "enum": ["Storage", "Compute", "Database", "Networking", "Integration", "Security", "Monitoring"]
+    },
+    "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "description": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "renderMode": { "type": "string", "enum": ["parameter", "jinja"] },
+    "parameterMap": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "maturity": { "type": "string", "enum": ["stable", "beta", "deprecated"], "default": "beta" },
+    "owners": { "type": "array", "items": { "type": "string" } },
+    "defaultsByEnv": {
+      "type": "object",
+      "propertyNames": { "enum": ["dev", "stg", "prod"] },
+      "additionalProperties": { "type": "object" }
+    },
+    "executionRoleArn": { "type": "string", "pattern": "^arn:aws:iam::\\d{12}:role/platform-exec-.+$" },
+    "estimatedMonthlyCost": { "type": "string" },
+    "cfnCapabilities": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["CAPABILITY_IAM", "CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND"] }
+    },
+    "examples": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "object" },
+      "description": "Each example must validate against the template's own schema.json; examples[0] drives the validator dry-run (stage 8)."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "renderMode": { "const": "parameter" } } },
+      "then": { "required": ["parameterMap"] }
+    }
+  ]
+}

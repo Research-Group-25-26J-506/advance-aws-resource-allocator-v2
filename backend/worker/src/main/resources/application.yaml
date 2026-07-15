@@ -1,0 +1,48 @@
+spring:
+  application:
+    name: platform-worker
+  datasource:
+    url: jdbc:mysql://${PLATFORM_DB_HOST:localhost}:${PLATFORM_DB_PORT:3306}/platform
+    username: ${PLATFORM_DB_USER:platform_admin}
+    password: ${PLATFORM_DB_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: false   # the api service owns migrations; worker only validates
+  lifecycle:
+    timeout-per-shutdown-phase: 60s   # drain in-flight SQS handlers
+
+server:
+  port: 8082   # actuator probes only
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+platform:
+  aws:
+    region: ${AWS_REGION:us-east-1}
+    endpoint-override: ${PLATFORM_AWS_ENDPOINT:}
+  sqs:
+    requests-queue-url: ${PLATFORM_REQUESTS_QUEUE_URL:}
+  s3:
+    templates-bucket: ${PLATFORM_TEMPLATES_BUCKET:}
+  worker:
+    concurrency: ${PLATFORM_WORKER_CONCURRENCY:10}
+
+otel:
+  exporter:
+    otlp:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4317}
+  resource:
+    attributes:
+      service.name: platform-worker
+      deployment.environment: ${PLATFORM_ENV:dev}

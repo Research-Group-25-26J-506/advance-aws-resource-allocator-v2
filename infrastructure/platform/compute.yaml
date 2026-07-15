@@ -1,0 +1,497 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Platform compute tier (6.04). ECS cluster + ALB + services (web-ui, api, worker), each with an
+  OTel Collector sidecar. Scale parameter flips dev-lite (min 1) vs prod minimums. ALB idle
+  timeout 120s so SSE streams survive (server sends a keepalive event every 15s — see 2.05/3.01).
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [dev, stg, prod]
+  ImageTag:
+    Type: String
+    Default: latest
+    Description: Image tag to deploy (short git SHA from build-images workflow)
+  Scale:
+    Type: String
+    AllowedValues: [dev, prod]
+    Default: dev
+    Description: dev = min 1 task everywhere; prod = api/web-ui min 2, worker min 3
+  CertificateArn:
+    Type: String
+    Default: ""
+    Description: ACM certificate for HTTPS. Empty = HTTP-only listener (dev sandbox only).
+
+Conditions:
+  IsProdScale: !Equals [!Ref Scale, prod]
+  HasCert: !Not [!Equals [!Ref CertificateArn, ""]]
+  NoCert: !Equals [!Ref CertificateArn, ""]
+
+Resources:
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub platform-cluster-${EnvironmentName}
+      CapacityProviders: [FARGATE, FARGATE_SPOT]
+      ClusterSettings: [{ Name: containerInsights, Value: enabled }]
+
+  # ------------------------------------------------------------------- ALB
+  Alb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub platform-${EnvironmentName}
+      Scheme: internet-facing
+      Type: application
+      SecurityGroups:
+        - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-alb}}"
+      Subnets: !Split
+        - ","
+        - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/public-subnets}}"
+      LoadBalancerAttributes:
+        - { Key: idle_timeout.timeout_seconds, Value: "120" }   # SSE > 60s default
+        - { Key: routing.http.drop_invalid_header_fields.enabled, Value: "true" }
+
+  WebTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub platform-${EnvironmentName}-web
+      VpcId: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/vpc-id}}"
+      Port: 8081
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckPath: /healthz
+      HealthCheckIntervalSeconds: 15
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      TargetGroupAttributes:
+        - { Key: deregistration_delay.timeout_seconds, Value: "30" }
+
+  ApiTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub platform-${EnvironmentName}-api
+      VpcId: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/vpc-id}}"
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckPath: /actuator/health/readiness
+      HealthCheckIntervalSeconds: 15
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      TargetGroupAttributes:
+        - { Key: deregistration_delay.timeout_seconds, Value: "30" }
+
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HasCert
+    Properties:
+      LoadBalancerArn: !Ref Alb
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      Certificates: [{ CertificateArn: !Ref CertificateArn }]
+      DefaultActions: [{ Type: forward, TargetGroupArn: !Ref WebTargetGroup }]
+
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref Alb
+      Port: 80
+      Protocol: HTTP
+      DefaultActions: !If
+        - HasCert
+        - - Type: redirect
+            RedirectConfig: { Protocol: HTTPS, Port: "443", StatusCode: HTTP_301 }
+        - - { Type: forward, TargetGroupArn: !Ref WebTargetGroup }
+
+  ApiListenerRuleHttps:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Condition: HasCert
+    Properties:
+      ListenerArn: !Ref HttpsListener
+      Priority: 10
+      Conditions: [{ Field: path-pattern, PathPatternConfig: { Values: ["/api/*"] } }]
+      Actions: [{ Type: forward, TargetGroupArn: !Ref ApiTargetGroup }]
+
+  ApiListenerRuleHttp:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Condition: NoCert
+    Properties:
+      ListenerArn: !Ref HttpListener
+      Priority: 10
+      Conditions: [{ Field: path-pattern, PathPatternConfig: { Values: ["/api/*"] } }]
+      Actions: [{ Type: forward, TargetGroupArn: !Ref ApiTargetGroup }]
+
+  # ---------------------------------------------------------------- Log groups
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: !Sub /platform/${EnvironmentName}/api, RetentionInDays: 30 }
+  WorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: !Sub /platform/${EnvironmentName}/worker, RetentionInDays: 30 }
+  WebLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: !Sub /platform/${EnvironmentName}/web-ui, RetentionInDays: 30 }
+
+  # -------------------------------------------------------------------- Roles
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-${EnvironmentName}-task-exec-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: read-config
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [ssm:GetParameter, ssm:GetParameters]
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/platform/*
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:/platform/*
+
+  ApiTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-${EnvironmentName}-api-task-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: api
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: EnqueueWork
+                Effect: Allow
+                Action: [sqs:SendMessage]
+                Resource: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/sqs/requests-queue-arn}}"
+              - Sid: Idempotency
+                Effect: Allow
+                Action: [dynamodb:PutItem, dynamodb:GetItem, dynamodb:UpdateItem]
+                Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/platform-idempotency-${EnvironmentName}
+              - Sid: TemplatesRead
+                Effect: Allow
+                Action: [s3:GetObject, s3:ListBucket]
+                Resource:
+                  - !Sub arn:aws:s3:::platform-templates-${AWS::AccountId}-${EnvironmentName}
+                  - !Sub arn:aws:s3:::platform-templates-${AWS::AccountId}-${EnvironmentName}/*
+              - Sid: Config
+                Effect: Allow
+                Action: [ssm:GetParameter, ssm:GetParameters, ssm:GetParametersByPath]
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/platform/*
+
+  WorkerTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-${EnvironmentName}-worker-task-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: worker
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ConsumeWork
+                Effect: Allow
+                Action: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:ChangeMessageVisibility, sqs:GetQueueAttributes]
+                Resource: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/sqs/requests-queue-arn}}"
+              - Sid: TemplatesReadWrite
+                Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:ListBucket]
+                Resource:
+                  - !Sub arn:aws:s3:::platform-templates-${AWS::AccountId}-${EnvironmentName}
+                  - !Sub arn:aws:s3:::platform-templates-${AWS::AccountId}-${EnvironmentName}/*
+                  - !Sub arn:aws:s3:::platform-cfn-uploads-${AWS::AccountId}-${EnvironmentName}
+                  - !Sub arn:aws:s3:::platform-cfn-uploads-${AWS::AccountId}-${EnvironmentName}/*
+              - Sid: AssumeExecRoles
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Sub arn:aws:iam::*:role/platform-exec-*
+              - Sid: Locks
+                Effect: Allow
+                Action: [dynamodb:PutItem, dynamodb:GetItem, dynamodb:DeleteItem, dynamodb:UpdateItem]
+                Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/platform-locks-${EnvironmentName}
+              - Sid: Config
+                Effect: Allow
+                Action: [ssm:GetParameter, ssm:GetParameters, ssm:GetParametersByPath]
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/platform/*
+
+  WebTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-${EnvironmentName}-web-task-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+
+  # ------------------------------------------------------------ Task definitions
+  # Each task: main container + OTel Collector sidecar (config from SSM). Fluent Bit log-router
+  # sidecar lands with the observability stack (4.01/4.07); awslogs is the interim driver.
+  ApiTaskDef:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub platform-${EnvironmentName}-api
+      RequiresCompatibilities: [FARGATE]
+      Cpu: "512"
+      Memory: "1024"
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt ApiTaskRole.Arn
+      RuntimePlatform: { CpuArchitecture: ARM64, OperatingSystemFamily: LINUX }
+      ContainerDefinitions:
+        - Name: api
+          Image: !Sub
+            - "${Repo}:api-${ImageTag}"
+            - Repo: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/ecr-repo}}"
+          PortMappings: [{ ContainerPort: 8080 }]
+          Essential: true
+          Environment:
+            - { Name: SPRING_PROFILES_ACTIVE, Value: !Ref EnvironmentName }
+            - { Name: PLATFORM_ENV, Value: !Ref EnvironmentName }
+            - { Name: OTEL_EXPORTER_OTLP_ENDPOINT, Value: http://localhost:4317 }
+          StopTimeout: 30
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ApiLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: api
+          HealthCheck:
+            Command: [CMD-SHELL, "wget -qO- http://localhost:8080/actuator/health/liveness || exit 1"]
+            Interval: 15
+            Retries: 3
+        - Name: otel-collector
+          Image: public.ecr.aws/aws-observability/aws-otel-collector:v0.40.0
+          Essential: false
+          Environment:
+            - Name: AOT_CONFIG_CONTENT
+              Value: !Sub "{{resolve:ssm:/platform/otel/sidecar/config}}"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ApiLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: otel
+
+  WorkerTaskDef:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub platform-${EnvironmentName}-worker
+      RequiresCompatibilities: [FARGATE]
+      Cpu: "512"
+      Memory: "1024"
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt WorkerTaskRole.Arn
+      RuntimePlatform: { CpuArchitecture: ARM64, OperatingSystemFamily: LINUX }
+      ContainerDefinitions:
+        - Name: worker
+          Image: !Sub
+            - "${Repo}:worker-${ImageTag}"
+            - Repo: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/ecr-repo}}"
+          Essential: true
+          Environment:
+            - { Name: SPRING_PROFILES_ACTIVE, Value: !Ref EnvironmentName }
+            - { Name: PLATFORM_ENV, Value: !Ref EnvironmentName }
+            - { Name: OTEL_EXPORTER_OTLP_ENDPOINT, Value: http://localhost:4317 }
+          StopTimeout: 120   # graceful drain of in-flight SQS handlers (3.4)
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref WorkerLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: worker
+        - Name: otel-collector
+          Image: public.ecr.aws/aws-observability/aws-otel-collector:v0.40.0
+          Essential: false
+          Environment:
+            - Name: AOT_CONFIG_CONTENT
+              Value: !Sub "{{resolve:ssm:/platform/otel/sidecar/config}}"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref WorkerLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: otel
+
+  WebTaskDef:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub platform-${EnvironmentName}-web
+      RequiresCompatibilities: [FARGATE]
+      Cpu: "256"
+      Memory: "512"
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt WebTaskRole.Arn
+      RuntimePlatform: { CpuArchitecture: ARM64, OperatingSystemFamily: LINUX }
+      ContainerDefinitions:
+        - Name: web-ui
+          Image: !Sub
+            - "${Repo}:web-ui-${ImageTag}"
+            - Repo: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/ecr-repo}}"
+          PortMappings: [{ ContainerPort: 8081 }]
+          Essential: true
+          StopTimeout: 10
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref WebLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: web
+
+  # ------------------------------------------------------------------ Services
+  ApiService:
+    Type: AWS::ECS::Service
+    DependsOn: HttpListener
+    Properties:
+      ServiceName: api
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref ApiTaskDef
+      LaunchType: FARGATE
+      DesiredCount: !If [IsProdScale, 2, 1]
+      EnableExecuteCommand: !If [IsProdScale, false, true]   # ECS Exec in dev only
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker: { Enable: true, Rollback: true }
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Split
+            - ","
+            - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/app-subnets}}"
+          SecurityGroups:
+            - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-ecs}}"
+      LoadBalancers:
+        - { ContainerName: api, ContainerPort: 8080, TargetGroupArn: !Ref ApiTargetGroup }
+      HealthCheckGracePeriodSeconds: 90
+
+  WebService:
+    Type: AWS::ECS::Service
+    DependsOn: HttpListener
+    Properties:
+      ServiceName: web-ui
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref WebTaskDef
+      LaunchType: FARGATE
+      DesiredCount: !If [IsProdScale, 2, 1]
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker: { Enable: true, Rollback: true }
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Split
+            - ","
+            - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/app-subnets}}"
+          SecurityGroups:
+            - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-ecs}}"
+      LoadBalancers:
+        - { ContainerName: web-ui, ContainerPort: 8081, TargetGroupArn: !Ref WebTargetGroup }
+
+  WorkerService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: worker
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref WorkerTaskDef
+      LaunchType: FARGATE
+      DesiredCount: !If [IsProdScale, 3, 1]
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker: { Enable: true, Rollback: true }
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Split
+            - ","
+            - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/app-subnets}}"
+          SecurityGroups:
+            - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-ecs}}"
+
+  # --------------------------------------------------------------- Autoscaling
+  AutoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs.application-autoscaling.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceAutoscaleRole
+
+  ApiScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      ServiceNamespace: ecs
+      ResourceId: !Sub service/${Cluster}/${ApiService.Name}
+      ScalableDimension: ecs:service:DesiredCount
+      MinCapacity: !If [IsProdScale, 2, 1]
+      MaxCapacity: 10
+      RoleARN: !GetAtt AutoScalingRole.Arn
+  ApiScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: api-cpu-60
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ApiScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification: { PredefinedMetricType: ECSServiceAverageCPUUtilization }
+        TargetValue: 60
+
+  WorkerScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      ServiceNamespace: ecs
+      ResourceId: !Sub service/${Cluster}/${WorkerService.Name}
+      ScalableDimension: ecs:service:DesiredCount
+      MinCapacity: !If [IsProdScale, 3, 1]
+      MaxCapacity: 20
+      RoleARN: !GetAtt AutoScalingRole.Arn
+  WorkerScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: worker-cpu-60
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref WorkerScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification: { PredefinedMetricType: ECSServiceAverageCPUUtilization }
+        TargetValue: 60
+
+  # ---------------------------------------------------------------- SSM wiring
+  SsmAlbDns:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/alb-dns
+      Type: String
+      Value: !GetAtt Alb.DNSName
+  SsmClusterName:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/ecs-cluster
+      Type: String
+      Value: !Ref Cluster
+
+Outputs:
+  AlbDnsName: { Value: !GetAtt Alb.DNSName }
+  ClusterName: { Value: !Ref Cluster }

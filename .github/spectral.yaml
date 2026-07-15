@@ -1,0 +1,6 @@
+extends: ["spectral:oas"]
+rules:
+  # Platform-specific: every operation must carry an operationId and at least one tag.
+  operation-operationId: error
+  operation-tags: error
+  oas3-missing-schema-definition: warn

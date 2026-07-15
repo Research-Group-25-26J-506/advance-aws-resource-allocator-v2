@@ -1,0 +1,20 @@
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/platform
+    username: platform
+    password: platform
+
+platform:
+  aws:
+    region: us-east-1
+    endpoint-override: http://localhost:4566
+  sqs:
+    requests-queue-url: http://localhost:4566/000000000000/platform-requests-dev
+  s3:
+    templates-bucket: platform-templates-local
+  worker:
+    concurrency: 2
+
+otel:
+  sdk:
+    disabled: ${OTEL_DISABLED:true}

@@ -1,0 +1,437 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Platform Quickstart (v2.1) - single drag-and-drop bootstrap for the AWS
+  Self-Service Deployment Platform. Creates the versioned S3 template registry,
+  seeds it from your platform-templates GitHub repo via a Custom Resource,
+  keeps it synced on a schedule, and (optionally) sets up GitHub Actions OIDC
+  with CI deploy/plan roles. Requires nothing pre-existing in the account.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: Environment }
+        Parameters: [EnvironmentName]
+      - Label: { default: Templates repository (GitHub) }
+        Parameters: [GitHubOrg, TemplatesRepo, TemplatesBranch, TemplatesPathPrefix, GitHubTokenSecretArn]
+      - Label: { default: Ongoing sync }
+        Parameters: [EnableScheduledSync, SyncScheduleExpression, SyncNonce]
+      - Label: { default: GitHub Actions CI (OIDC) }
+        Parameters: [EnableGitHubOidc, PlatformRepo]
+    ParameterLabels:
+      EnvironmentName: { default: Environment name }
+      GitHubOrg: { default: GitHub org/user that owns the templates repo }
+      GitHubTokenSecretArn: { default: Secrets Manager ARN of a GitHub token (leave blank for public repos) }
+      PlatformRepo: { default: 'Platform monorepo allowed to deploy via CI (format: org/repo)' }
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [dev, stg, prod]
+    Default: dev
+    Description: Environment this bootstrap belongs to. Used in resource names and SSM paths.
+  GitHubOrg:
+    Type: String
+    AllowedPattern: '[A-Za-z0-9-]+'
+    Description: GitHub organisation or username owning the templates repository.
+  TemplatesRepo:
+    Type: String
+    Default: platform-templates
+    AllowedPattern: '[A-Za-z0-9._-]+'
+    Description: Repository containing platform CloudFormation templates.
+  TemplatesBranch:
+    Type: String
+    Default: main
+    Description: Branch to sync from.
+  TemplatesPathPrefix:
+    Type: String
+    Default: templates/
+    Description: Path inside the repo to mirror into S3 (trailing slash optional).
+  GitHubTokenSecretArn:
+    Type: String
+    Default: ''
+    Description: >-
+      OPTIONAL. Secrets Manager secret ARN holding a GitHub token (plain string
+      or JSON with a "token" key). Leave blank if the repo is public.
+  EnableScheduledSync:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+    Description: Keep the bucket following the repo on a schedule until the full platform sync service takes over.
+  SyncScheduleExpression:
+    Type: String
+    Default: rate(1 hour)
+    Description: EventBridge schedule expression for the ongoing sync.
+  SyncNonce:
+    Type: String
+    Default: '1'
+    Description: Change this value and update the stack to force an immediate re-sync.
+  EnableGitHubOidc:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+    Description: Create the GitHub OIDC provider and CI deploy/plan roles.
+  PlatformRepo:
+    Type: String
+    Default: ''
+    Description: >-
+      Full name (org/repo) of the platform monorepo whose GitHub Actions may
+      assume the CI roles. Required when EnableGitHubOidc is true.
+
+Conditions:
+  HasToken: !Not [!Equals [!Ref GitHubTokenSecretArn, '']]
+  ScheduledSync: !Equals [!Ref EnableScheduledSync, 'true']
+  CreateOidc: !Equals [!Ref EnableGitHubOidc, 'true']
+
+Resources:
+
+  # ---------------------------------------------------------------- registry
+  TemplatesBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub 'platform-templates-${AWS::AccountId}-${EnvironmentName}'
+      VersioningConfiguration: { Status: Enabled }
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - { Key: Environment, Value: !Ref EnvironmentName }
+        - { Key: ManagedBy, Value: Platform }
+        - { Key: Application, Value: deployment-platform }
+
+  TemplatesBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref TemplatesBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt TemplatesBucket.Arn
+              - !Sub '${TemplatesBucket.Arn}/*'
+            Condition:
+              Bool: { 'aws:SecureTransport': 'false' }
+
+  # ------------------------------------------------------------ sync lambda
+  SyncFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'platform-quickstart-sync-${EnvironmentName}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: repo-sync
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: WriteRegistry
+                Effect: Allow
+                Action: [s3:PutObject, s3:GetObject, s3:ListBucket]
+                Resource:
+                  - !GetAtt TemplatesBucket.Arn
+                  - !Sub '${TemplatesBucket.Arn}/*'
+              - Sid: Logs
+                Effect: Allow
+                Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/platform-quickstart-sync-${EnvironmentName}*'
+              - !If
+                - HasToken
+                - Sid: ReadGitHubToken
+                  Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource: !Ref GitHubTokenSecretArn
+                - !Ref AWS::NoValue
+      Tags:
+        - { Key: Environment, Value: !Ref EnvironmentName }
+        - { Key: ManagedBy, Value: Platform }
+
+  SyncFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'platform-quickstart-sync-${EnvironmentName}'
+      Description: Mirrors the platform-templates GitHub repo into the S3 template registry (quickstart seed + scheduled sync).
+      Runtime: python3.12
+      Handler: index.handler
+      Timeout: 300
+      MemorySize: 512
+      Role: !GetAtt SyncFunctionRole.Arn
+      Environment:
+        Variables:
+          GH_ORG: !Ref GitHubOrg
+          GH_REPO: !Ref TemplatesRepo
+          GH_BRANCH: !Ref TemplatesBranch
+          PATH_PREFIX: !Ref TemplatesPathPrefix
+          BUCKET: !Ref TemplatesBucket
+          TOKEN_SECRET_ARN: !If [HasToken, !Ref GitHubTokenSecretArn, '']
+      Code:
+        ZipFile: |
+          import os, io, json, tarfile, urllib.request, boto3, cfnresponse
+          s3 = boto3.client('s3')
+          MAX_TARBALL = 200 * 1024 * 1024
+
+          def get_token(arn):
+              if not arn:
+                  return None
+              val = boto3.client('secretsmanager').get_secret_value(SecretId=arn)['SecretString']
+              try:
+                  j = json.loads(val)
+                  return j.get('token') or j.get('TOKEN') or val
+              except Exception:
+                  return val
+
+          def sync(cfg):
+              url = 'https://codeload.github.com/%s/%s/tar.gz/refs/heads/%s' % (
+                  cfg['org'], cfg['repo'], cfg['branch'])
+              req = urllib.request.Request(url)
+              tok = get_token(cfg.get('secret'))
+              if tok:
+                  req.add_header('Authorization', 'Bearer ' + tok)
+              data = urllib.request.urlopen(req, timeout=60).read()
+              if len(data) > MAX_TARBALL:
+                  raise Exception('tarball exceeds size limit')
+              pfx = cfg['prefix'].strip('/') + '/'
+              n = 0
+              with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as tar:
+                  for m in tar:
+                      if not m.isfile():
+                          continue  # skip dirs, symlinks, devices
+                      parts = m.name.split('/', 1)
+                      if len(parts) < 2:
+                          continue  # top-level wrapper dir
+                      rel = parts[1]
+                      if rel.startswith('/') or '..' in rel.split('/'):
+                          continue  # path traversal guard
+                      if not rel.startswith(pfx):
+                          continue
+                      key = rel[len(pfx):]
+                      if not key:
+                          continue
+                      f = tar.extractfile(m)
+                      if f is None:
+                          continue
+                      s3.put_object(Bucket=cfg['bucket'], Key=key, Body=f.read())
+                      n += 1
+              if n == 0:
+                  raise Exception("no files found under prefix '%s' in %s/%s@%s" % (
+                      pfx, cfg['org'], cfg['repo'], cfg['branch']))
+              print(json.dumps({'synced': n, 'bucket': cfg['bucket']}))
+              return n
+
+          def env_cfg():
+              return {
+                  'org': os.environ['GH_ORG'],
+                  'repo': os.environ['GH_REPO'],
+                  'branch': os.environ['GH_BRANCH'],
+                  'prefix': os.environ['PATH_PREFIX'],
+                  'bucket': os.environ['BUCKET'],
+                  'secret': os.environ.get('TOKEN_SECRET_ARN') or None,
+              }
+
+          def handler(event, context):
+              if 'ResponseURL' in event:  # CloudFormation Custom Resource mode
+                  try:
+                      if event.get('RequestType') == 'Delete':
+                          cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, 'repo-sync')
+                          return
+                      n = sync(env_cfg())
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                                       {'Synced': str(n)}, 'repo-sync')
+                  except Exception as e:
+                      print('ERROR: %s' % e)
+                      cfnresponse.send(event, context, cfnresponse.FAILED,
+                                       {'Error': str(e)[:220]}, 'repo-sync')
+              else:  # EventBridge scheduled mode
+                  sync(env_cfg())
+      Tags:
+        - { Key: Environment, Value: !Ref EnvironmentName }
+        - { Key: ManagedBy, Value: Platform }
+
+  # Seeds the bucket during stack creation. Fails the stack if the repo,
+  # branch, prefix, or token is wrong - problems surface immediately.
+  RepoSeedSync:
+    Type: Custom::RepoSync
+    DependsOn: TemplatesBucketPolicy
+    Properties:
+      ServiceToken: !GetAtt SyncFunction.Arn
+      GitHubOrg: !Ref GitHubOrg
+      TemplatesRepo: !Ref TemplatesRepo
+      TemplatesBranch: !Ref TemplatesBranch
+      TemplatesPathPrefix: !Ref TemplatesPathPrefix
+      Nonce: !Ref SyncNonce
+
+  # ------------------------------------------------------- scheduled re-sync
+  ScheduledSyncRule:
+    Type: AWS::Events::Rule
+    Condition: ScheduledSync
+    Properties:
+      Name: !Sub 'platform-quickstart-sync-${EnvironmentName}'
+      Description: Periodically re-syncs the templates repo into the S3 registry.
+      ScheduleExpression: !Ref SyncScheduleExpression
+      State: ENABLED
+      Targets:
+        - Id: sync-fn
+          Arn: !GetAtt SyncFunction.Arn
+
+  ScheduledSyncPermission:
+    Type: AWS::Lambda::Permission
+    Condition: ScheduledSync
+    Properties:
+      FunctionName: !Ref SyncFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ScheduledSyncRule.Arn
+
+  # ------------------------------------------------------------ GitHub OIDC
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateOidc
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+      Tags:
+        - { Key: ManagedBy, Value: Platform }
+
+  CiDeployRole:
+    Type: AWS::IAM::Role
+    Condition: CreateOidc
+    Properties:
+      RoleName: !Sub 'platform-ci-deploy-${EnvironmentName}'
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Federated: !Ref GitHubOidcProvider }
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${PlatformRepo}:ref:refs/heads/main'
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/PowerUserAccess'
+      Policies:
+        - PolicyName: scoped-iam
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: PlatformRolesOnly
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:UpdateRole
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:PassRole
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/platform-*'
+                  - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/exec-role-*'
+      Tags:
+        - { Key: Environment, Value: !Ref EnvironmentName }
+        - { Key: ManagedBy, Value: Platform }
+
+  CiPlanRole:
+    Type: AWS::IAM::Role
+    Condition: CreateOidc
+    Properties:
+      RoleName: !Sub 'platform-ci-plan-${EnvironmentName}'
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Federated: !Ref GitHubOidcProvider }
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${PlatformRepo}:pull_request'
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/ReadOnlyAccess'
+      Tags:
+        - { Key: Environment, Value: !Ref EnvironmentName }
+        - { Key: ManagedBy, Value: Platform }
+
+  # --------------------------------------------- SSM wiring layer (see 10.3)
+  SsmTemplatesBucket:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/platform/${EnvironmentName}/templates-bucket'
+      Type: String
+      Value: !Ref TemplatesBucket
+      Description: S3 bucket holding the platform template registry.
+
+  SsmSyncFunctionArn:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/platform/${EnvironmentName}/quickstart/sync-function-arn'
+      Type: String
+      Value: !GetAtt SyncFunction.Arn
+      Description: ARN of the quickstart repo-sync Lambda.
+
+  SsmCiDeployRoleArn:
+    Type: AWS::SSM::Parameter
+    Condition: CreateOidc
+    Properties:
+      Name: !Sub '/platform/${EnvironmentName}/ci/deploy-role-arn'
+      Type: String
+      Value: !GetAtt CiDeployRole.Arn
+      Description: GitHub Actions deploy role (assume via OIDC).
+
+  SsmCiPlanRoleArn:
+    Type: AWS::SSM::Parameter
+    Condition: CreateOidc
+    Properties:
+      Name: !Sub '/platform/${EnvironmentName}/ci/plan-role-arn'
+      Type: String
+      Value: !GetAtt CiPlanRole.Arn
+      Description: GitHub Actions read-only plan role (assume via OIDC).
+
+Outputs:
+  TemplatesBucketName:
+    Description: The seeded, versioned S3 template registry.
+    Value: !Ref TemplatesBucket
+  TemplatesBucketArn:
+    Description: ARN of the template registry bucket.
+    Value: !GetAtt TemplatesBucket.Arn
+  SyncFunctionArn:
+    Description: Repo-sync Lambda (custom resource + scheduled).
+    Value: !GetAtt SyncFunction.Arn
+  ObjectsSeeded:
+    Description: Number of template files copied from the repo during stack creation.
+    Value: !GetAtt RepoSeedSync.Synced
+  CiDeployRoleArn:
+    Condition: CreateOidc
+    Description: Use as role-to-assume in GitHub Actions deploy workflows.
+    Value: !GetAtt CiDeployRole.Arn
+  CiPlanRoleArn:
+    Condition: CreateOidc
+    Description: Use as role-to-assume in GitHub Actions PR/plan workflows.
+    Value: !GetAtt CiPlanRole.Arn

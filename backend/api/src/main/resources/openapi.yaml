@@ -1,0 +1,564 @@
+openapi: 3.1.0
+info:
+  title: AWS Self-Service Deployment Platform API
+  version: 0.1.0
+  description: >-
+    Platform API (3.02). All state-creating POSTs require an Idempotency-Key header (UUIDv7);
+    repeats within 24h replay the original response. Errors are RFC 9457 application/problem+json
+    with a platform-specific `code`. Pagination is cursor-based (?limit + ?cursor). Filtering uses
+    RHS-colon syntax, e.g. ?status=in:CREATE_IN_PROGRESS,QUEUED&environment=eq:PROD.
+
+servers:
+  - url: /api/v1
+
+security:
+  - cognitoJwt: []
+
+tags:
+  - name: requests
+  - name: templates
+  - name: admin-sync
+  - name: approvals
+  - name: misc
+
+paths:
+  /requests:
+    post:
+      tags: [requests]
+      operationId: createRequest
+      summary: Submit a provisioning request (async — returns 202)
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateRequestPayload" }
+            example:
+              templateId: s3-bucket
+              environment: DEV
+              region: us-east-1
+              resourceName: analytics-raw-data
+              configuration: { bucketName: analytics-raw-data, versioning: { enabled: true } }
+      responses:
+        "202":
+          description: Accepted; poll Location or subscribe to the SSE stream
+          headers:
+            Location: { schema: { type: string }, description: /api/v1/requests/{id} }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Request" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    get:
+      tags: [requests]
+      operationId: listRequests
+      summary: List requests (filterable)
+      parameters:
+        - { name: requester, in: query, schema: { type: string, default: me } }
+        - { name: status, in: query, schema: { type: string }, description: "RHS-colon, e.g. in:QUEUED,CREATE_IN_PROGRESS" }
+        - { name: environment, in: query, schema: { type: string }, description: "e.g. eq:PROD" }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Page of requests
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Request" } }
+                  next_cursor: { type: [string, "null"] }
+              example:
+                items:
+                  - id: 0190a1b2-7d3e-7000-8000-3fb1c0ffee00
+                    templateId: s3-bucket
+                    environment: DEV
+                    region: us-east-1
+                    resourceName: analytics-raw-data
+                    status: CREATE_COMPLETE
+                    requesterEmail: dev@example.com
+                    submittedAt: "2026-07-15T09:30:00Z"
+                next_cursor: null
+
+  /requests/{id}:
+    parameters:
+      - $ref: "#/components/parameters/RequestId"
+    get:
+      tags: [requests]
+      operationId: getRequest
+      summary: Get one request
+      responses:
+        "200":
+          description: The request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Request" }
+        "404": { $ref: "#/components/responses/Problem" }
+    delete:
+      tags: [requests]
+      operationId: deleteRequest
+      summary: Delete the provisioned resource (async)
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          description: Deletion queued
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Request" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+  /requests/{id}/events:
+    get:
+      tags: [requests]
+      operationId: getRequestEvents
+      summary: Lifecycle events — JSON list, or SSE stream with Accept text/event-stream
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - { name: Last-Event-ID, in: header, schema: { type: string }, description: SSE resume point }
+      responses:
+        "200":
+          description: Event list or stream (each SSE event is a full status snapshot with an id field)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RequestEvent" }
+              example:
+                - { from: null, to: PENDING_VALIDATION, reason: Submitted, source: PLATFORM, occurredAt: "2026-07-15T09:30:00Z" }
+                - { from: PENDING_VALIDATION, to: QUEUED, reason: Validation passed, source: PLATFORM, occurredAt: "2026-07-15T09:30:01Z" }
+            text/event-stream:
+              schema: { type: string }
+
+  /requests/{id}/retry:
+    post:
+      tags: [requests]
+      operationId: retryRequest
+      summary: Retry a failed request
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          description: Requeued
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Request" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+  /requests/{id}/cancel:
+    post:
+      tags: [requests]
+      operationId: cancelRequest
+      summary: Cancel a queued request
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          description: Cancellation accepted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Request" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+  /templates:
+    get:
+      tags: [templates]
+      operationId: listTemplates
+      summary: Browse the catalog
+      parameters:
+        - { name: maturity, in: query, schema: { type: string }, example: "stable,beta" }
+      responses:
+        "200":
+          description: Published templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Template" }
+              example:
+                - { id: s3-bucket, displayName: S3 Bucket, description: Versioned encrypted bucket,
+                    category: Storage, maturity: stable, latestVersion: 1.0.0 }
+
+  /templates/{id}:
+    get:
+      tags: [templates]
+      operationId: getTemplate
+      summary: Template detail incl. JSON Schema for the wizard
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Template + latest published version + form schema
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  template: { $ref: "#/components/schemas/Template" }
+                  latestVersion: { type: string }
+                  schema: { type: string, description: JSON Schema (draft-07) as a string }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /admin/templates/sync:
+    post:
+      tags: [admin-sync]
+      operationId: triggerSync
+      summary: Pull platform-templates repo, validate, publish to S3 (admin)
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode: { type: string, enum: [APPLY, DRY_RUN], default: DRY_RUN }
+                branch: { type: string, default: main }
+            example: { mode: DRY_RUN, branch: main }
+      responses:
+        "202":
+          description: Sync started
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TemplateSync" }
+        "409": { $ref: "#/components/responses/Problem" }
+    get:
+      tags: [admin-sync]
+      operationId: listSyncs
+      summary: Sync history
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Page of syncs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/TemplateSync" } }
+                  next_cursor: { type: [string, "null"] }
+
+  /admin/templates/sync/{id}:
+    get:
+      tags: [admin-sync]
+      operationId: getSync
+      summary: One sync run (SSE stream of events at /events)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Sync detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TemplateSync" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /approvals:
+    get:
+      tags: [approvals]
+      operationId: listApprovals
+      summary: Approvals inbox (APPROVER role)
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Pending approvals
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Approval" } }
+                  next_cursor: { type: [string, "null"] }
+
+  /approvals/{requestId}/approve:
+    post:
+      tags: [approvals]
+      operationId: approveRequest
+      summary: Approve a PROD request
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          description: Approved and queued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Request" }
+
+  /approvals/{requestId}/reject:
+    post:
+      tags: [approvals]
+      operationId: rejectRequest
+      summary: Reject a PROD request
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+      responses:
+        "202":
+          description: Rejected
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Request" }
+
+  /me:
+    get:
+      tags: [misc]
+      operationId: getMe
+      summary: Current user identity + roles
+      responses:
+        "200":
+          description: Identity
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  email: { type: string }
+                  roles: { type: array, items: { type: string } }
+              example: { id: dev@example.com, email: dev@example.com, roles: [USER] }
+
+  /regions:
+    get:
+      tags: [misc]
+      operationId: listRegions
+      summary: Allowed regions per environment
+      parameters:
+        - { name: env, in: query, schema: { $ref: "#/components/schemas/Environment" } }
+      responses:
+        "200":
+          description: Region allowlist
+          content:
+            application/json:
+              schema: { type: array, items: { type: string } }
+              example: [us-east-1, eu-west-1]
+
+  /environments/health:
+    get:
+      tags: [misc]
+      operationId: environmentsHealth
+      summary: Per-environment health snapshot
+      responses:
+        "200":
+          description: Health rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    environment: { $ref: "#/components/schemas/Environment" }
+                    status: { type: string, enum: [HEALTHY, DEGRADED, DOWN] }
+                    lastIncidentAt: { type: string }
+
+  /dashboards/kpis:
+    get:
+      tags: [misc]
+      operationId: dashboardKpis
+      summary: Dashboard KPI cards (deltas computed server-side)
+      responses:
+        "200":
+          description: KPIs
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: { $ref: "#/components/schemas/Kpi" }
+              example:
+                active_requests: { value: 4, delta_pct: 33, direction: up }
+
+  /webhooks/github:
+    post:
+      tags: [misc]
+      operationId: githubWebhook
+      summary: GitHub App webhook (HMAC-signature auth, NOT JWT)
+      security: []   # explicitly opted out of cognitoJwt; X-Hub-Signature-256 verified in-handler
+      responses:
+        "204": { description: Accepted }
+        "401": { $ref: "#/components/responses/Problem" }
+
+components:
+  securitySchemes:
+    cognitoJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Cognito user-pool access token; groups claim drives RBAC.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, format: uuid }
+      description: UUIDv7. Same key + same payload within 24h replays the stored response.
+    RequestId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+
+  responses:
+    Problem:
+      description: RFC 9457 problem
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    RateLimited:
+      description: Rate limited
+      headers:
+        Retry-After: { schema: { type: integer } }
+        X-RateLimit-Limit: { schema: { type: integer } }
+        X-RateLimit-Remaining: { schema: { type: integer } }
+        X-RateLimit-Reset: { schema: { type: integer } }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+
+  schemas:
+    Environment:
+      type: string
+      enum: [DEV, STG, PROD]
+
+    # Single source of truth for the frontend PlatformStatus component (2.14a)
+    RequestStatus:
+      type: string
+      enum:
+        - DRAFT
+        - PENDING_VALIDATION
+        - FAILED_VALIDATION
+        - PENDING_APPROVAL
+        - REJECTED
+        - QUEUED
+        - CREATE_IN_PROGRESS
+        - CREATE_COMPLETE
+        - CREATE_FAILED
+        - ROLLBACK_IN_PROGRESS
+        - ROLLBACK_COMPLETE
+        - ROLLBACK_FAILED
+        - UPDATE_IN_PROGRESS
+        - UPDATE_COMPLETE
+        - UPDATE_FAILED
+        - UPDATE_ROLLBACK_IN_PROGRESS
+        - UPDATE_ROLLBACK_COMPLETE
+        - DELETE_IN_PROGRESS
+        - DELETE_COMPLETE
+        - DELETE_FAILED
+
+    SyncStatus:
+      type: string
+      enum: [SYNC_PENDING, SYNC_VALIDATING, SYNC_UPLOADING, SYNC_COMPLETE, SYNC_FAILED]
+
+    CreateRequestPayload:
+      type: object
+      required: [templateId, environment, region, resourceName, configuration]
+      properties:
+        templateId: { type: string, pattern: "^[a-z][a-z0-9-]{1,63}$" }
+        environment: { $ref: "#/components/schemas/Environment" }
+        region: { type: string, pattern: "^[a-z]{2}-[a-z]+-\\d$" }
+        resourceName: { type: string, pattern: "^[a-z][a-z0-9-]{2,62}$" }
+        description: { type: string }
+        configuration: { type: object, description: Validated against the template's JSON Schema }
+
+    Request:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        templateId: { type: string }
+        environment: { $ref: "#/components/schemas/Environment" }
+        region: { type: string }
+        resourceName: { type: string }
+        status: { $ref: "#/components/schemas/RequestStatus" }
+        requesterEmail: { type: string }
+        stackId: { type: [string, "null"] }
+        failureReason: { type: [string, "null"] }
+        submittedAt: { type: string, format: date-time }
+
+    RequestEvent:
+      type: object
+      properties:
+        from: { type: [string, "null"] }
+        to: { $ref: "#/components/schemas/RequestStatus" }
+        reason: { type: [string, "null"] }
+        source: { type: string, enum: [PLATFORM, CLOUDFORMATION] }
+        occurredAt: { type: string, format: date-time }
+
+    Template:
+      type: object
+      properties:
+        id: { type: string }
+        displayName: { type: string }
+        description: { type: string }
+        category: { type: string }
+        maturity: { type: string, enum: [stable, beta, deprecated] }
+        application: { type: [string, "null"] }
+        latestVersion: { type: [string, "null"] }
+
+    TemplateSync:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        actorId: { type: string }
+        commitSha: { type: string }
+        branch: { type: string }
+        mode: { type: string, enum: [APPLY, DRY_RUN] }
+        status: { $ref: "#/components/schemas/SyncStatus" }
+        startedAt: { type: string, format: date-time }
+        completedAt: { type: [string, "null"], format: date-time }
+
+    Approval:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        requestId: { type: string, format: uuid }
+        decision: { type: string, enum: [PENDING, APPROVED, REJECTED] }
+        requestedAt: { type: string, format: date-time }
+
+    Kpi:
+      type: object
+      properties:
+        value: { type: number }
+        delta_pct: { type: number }
+        direction: { type: string, enum: [up, down, flat] }
+
+    Problem:
+      type: object
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string, description: Platform-specific machine-readable error code }

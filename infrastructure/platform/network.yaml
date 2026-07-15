@@ -1,0 +1,504 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Platform VPC (6.02). 3 AZs, public + private-app + private-data subnets. Cost switches:
+  NatStrategy (per-az|single|none) and EndpointProfile (full|minimal). Outputs go to SSM
+  /platform/{env}/network/* — never CloudFormation Exports.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [dev, stg, prod]
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: Non-overlapping per environment (dev 10.0/16, stg 10.1/16, prod 10.2/16)
+  NatStrategy:
+    Type: String
+    AllowedValues: [per-az, single, none]
+    Default: single
+    Description: per-az for prod HA; single for dev (~$65/mo saved per NAT); none for pure-endpoint experiments
+  EndpointProfile:
+    Type: String
+    AllowedValues: [full, minimal]
+    Default: minimal
+    Description: full = 12 interface endpoints (prod posture); minimal = free gateway endpoints only, egress via NAT
+
+Conditions:
+  NatPerAz: !Equals [!Ref NatStrategy, per-az]
+  HasNat: !Not [!Equals [!Ref NatStrategy, none]]
+  FullEndpoints: !Equals [!Ref EndpointProfile, full]
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-vpc }]
+
+  Igw:
+    Type: AWS::EC2::InternetGateway
+  IgwAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: { VpcId: !Ref Vpc, InternetGatewayId: !Ref Igw }
+
+  # -------------------------------------------------------------- Subnets (3 AZ)
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Select [0, !Cidr [!Ref VpcCidr, 9, 8]]
+      MapPublicIpOnLaunch: false
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-public-a }]
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: !Select [1, !Cidr [!Ref VpcCidr, 9, 8]]
+      MapPublicIpOnLaunch: false
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-public-b }]
+  PublicSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [2, !GetAZs ""]
+      CidrBlock: !Select [2, !Cidr [!Ref VpcCidr, 9, 8]]
+      MapPublicIpOnLaunch: false
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-public-c }]
+
+  AppSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Select [3, !Cidr [!Ref VpcCidr, 9, 8]]
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-app-a }]
+  AppSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: !Select [4, !Cidr [!Ref VpcCidr, 9, 8]]
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-app-b }]
+  AppSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [2, !GetAZs ""]
+      CidrBlock: !Select [5, !Cidr [!Ref VpcCidr, 9, 8]]
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-app-c }]
+
+  DataSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Select [6, !Cidr [!Ref VpcCidr, 9, 8]]
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-data-a }]
+  DataSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: !Select [7, !Cidr [!Ref VpcCidr, 9, 8]]
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-data-b }]
+  DataSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [2, !GetAZs ""]
+      CidrBlock: !Select [8, !Cidr [!Ref VpcCidr, 9, 8]]
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-data-c }]
+
+  # -------------------------------------------------------------- Routing
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-public-rt }]
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: IgwAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref Igw
+  PublicRtAssocA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref PublicSubnetA, RouteTableId: !Ref PublicRouteTable }
+  PublicRtAssocB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref PublicSubnetB, RouteTableId: !Ref PublicRouteTable }
+  PublicRtAssocC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref PublicSubnetC, RouteTableId: !Ref PublicRouteTable }
+
+  NatEipA:
+    Type: AWS::EC2::EIP
+    Condition: HasNat
+    Properties: { Domain: vpc }
+  NatGatewayA:
+    Type: AWS::EC2::NatGateway
+    Condition: HasNat
+    Properties:
+      AllocationId: !GetAtt NatEipA.AllocationId
+      SubnetId: !Ref PublicSubnetA
+  NatEipB:
+    Type: AWS::EC2::EIP
+    Condition: NatPerAz
+    Properties: { Domain: vpc }
+  NatGatewayB:
+    Type: AWS::EC2::NatGateway
+    Condition: NatPerAz
+    Properties:
+      AllocationId: !GetAtt NatEipB.AllocationId
+      SubnetId: !Ref PublicSubnetB
+  NatEipC:
+    Type: AWS::EC2::EIP
+    Condition: NatPerAz
+    Properties: { Domain: vpc }
+  NatGatewayC:
+    Type: AWS::EC2::NatGateway
+    Condition: NatPerAz
+    Properties:
+      AllocationId: !GetAtt NatEipC.AllocationId
+      SubnetId: !Ref PublicSubnetC
+
+  AppRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-app-rt-a }]
+  AppRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-app-rt-b }]
+  AppRouteTableC:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-app-rt-c }]
+  AppNatRouteA:
+    Type: AWS::EC2::Route
+    Condition: HasNat
+    Properties:
+      RouteTableId: !Ref AppRouteTableA
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayA
+  AppNatRouteB:
+    Type: AWS::EC2::Route
+    Condition: HasNat
+    Properties:
+      RouteTableId: !Ref AppRouteTableB
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !If [NatPerAz, !Ref NatGatewayB, !Ref NatGatewayA]
+  AppNatRouteC:
+    Type: AWS::EC2::Route
+    Condition: HasNat
+    Properties:
+      RouteTableId: !Ref AppRouteTableC
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !If [NatPerAz, !Ref NatGatewayC, !Ref NatGatewayA]
+  AppRtAssocA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref AppSubnetA, RouteTableId: !Ref AppRouteTableA }
+  AppRtAssocB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref AppSubnetB, RouteTableId: !Ref AppRouteTableB }
+  AppRtAssocC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref AppSubnetC, RouteTableId: !Ref AppRouteTableC }
+
+  # Data subnets: no NAT, no IGW route — endpoint/gateway access only.
+  DataRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-data-rt }]
+  DataRtAssocA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref DataSubnetA, RouteTableId: !Ref DataRouteTable }
+  DataRtAssocB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref DataSubnetB, RouteTableId: !Ref DataRouteTable }
+  DataRtAssocC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref DataSubnetC, RouteTableId: !Ref DataRouteTable }
+
+  # -------------------------------------------------------------- Security groups
+  AlbSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB — HTTPS from the internet
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: HTTPS }
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-sg-alb }]
+
+  EcsSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ECS tasks — traffic from ALB and intra-service
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 8080, ToPort: 8080, SourceSecurityGroupId: !Ref AlbSg, Description: api from ALB }
+        - { IpProtocol: tcp, FromPort: 8081, ToPort: 8081, SourceSecurityGroupId: !Ref AlbSg, Description: web-ui from ALB }
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-sg-ecs }]
+  EcsSgSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref EcsSg
+      IpProtocol: "-1"
+      SourceSecurityGroupId: !Ref EcsSg
+      Description: intra-service (OTel sidecars, gateway)
+
+  RdsSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Aurora — MySQL from ECS tasks only
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 3306, ToPort: 3306, SourceSecurityGroupId: !Ref EcsSg, Description: MySQL from ECS }
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-sg-rds }]
+
+  VpceSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Interface endpoints — 443 from ECS tasks
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, SourceSecurityGroupId: !Ref EcsSg, Description: HTTPS from ECS }
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-sg-vpce }]
+
+  LokiSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Loki — 3100 from ECS tasks
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 3100, ToPort: 3100, SourceSecurityGroupId: !Ref EcsSg, Description: Loki push/query }
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-sg-loki }]
+
+  TempoSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Tempo — OTLP 4317 + query 3200 from ECS tasks
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 4317, ToPort: 4317, SourceSecurityGroupId: !Ref EcsSg, Description: OTLP gRPC }
+        - { IpProtocol: tcp, FromPort: 3200, ToPort: 3200, SourceSecurityGroupId: !Ref EcsSg, Description: Tempo query }
+      Tags: [{ Key: Name, Value: !Sub platform-${EnvironmentName}-sg-tempo }]
+
+  # -------------------------------------------------------------- Endpoints
+  # Gateway endpoints are free — always on.
+  S3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      VpcEndpointType: Gateway
+      RouteTableIds: [!Ref AppRouteTableA, !Ref AppRouteTableB, !Ref AppRouteTableC, !Ref DataRouteTable]
+  DynamoDbEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.dynamodb
+      VpcEndpointType: Gateway
+      RouteTableIds: [!Ref AppRouteTableA, !Ref AppRouteTableB, !Ref AppRouteTableC, !Ref DataRouteTable]
+
+  # Interface endpoints — full profile only (~$7/mo each + data).
+  # CloudFormation YAML has no anchor/merge support, hence the repetition.
+  CfnEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: FullEndpoints
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref AppSubnetA, !Ref AppSubnetB, !Ref AppSubnetC]
+      SecurityGroupIds: [!Ref VpceSg]
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.cloudformation
+  StsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: FullEndpoints
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref AppSubnetA, !Ref AppSubnetB, !Ref AppSubnetC]
+      SecurityGroupIds: [!Ref VpceSg]
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.sts
+  SecretsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: FullEndpoints
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref AppSubnetA, !Ref AppSubnetB, !Ref AppSubnetC]
+      SecurityGroupIds: [!Ref VpceSg]
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.secretsmanager
+  SsmEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: FullEndpoints
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref AppSubnetA, !Ref AppSubnetB, !Ref AppSubnetC]
+      SecurityGroupIds: [!Ref VpceSg]
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ssm
+  SsmMessagesEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: FullEndpoints
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref AppSubnetA, !Ref AppSubnetB, !Ref AppSubnetC]
+      SecurityGroupIds: [!Ref VpceSg]
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ssmmessages
+  Ec2MessagesEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: FullEndpoints
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref AppSubnetA, !Ref AppSubnetB, !Ref AppSubnetC]
+      SecurityGroupIds: [!Ref VpceSg]
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ec2messages
+  EcrApiEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: FullEndpoints
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref AppSubnetA, !Ref AppSubnetB, !Ref AppSubnetC]
+      SecurityGroupIds: [!Ref VpceSg]
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.api
+  EcrDkrEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: FullEndpoints
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref AppSubnetA, !Ref AppSubnetB, !Ref AppSubnetC]
+      SecurityGroupIds: [!Ref VpceSg]
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.dkr
+  LogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: FullEndpoints
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref AppSubnetA, !Ref AppSubnetB, !Ref AppSubnetC]
+      SecurityGroupIds: [!Ref VpceSg]
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.logs
+  MonitoringEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: FullEndpoints
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref AppSubnetA, !Ref AppSubnetB, !Ref AppSubnetC]
+      SecurityGroupIds: [!Ref VpceSg]
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.monitoring
+  SqsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: FullEndpoints
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref AppSubnetA, !Ref AppSubnetB, !Ref AppSubnetC]
+      SecurityGroupIds: [!Ref VpceSg]
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.sqs
+  ElbEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: FullEndpoints
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref AppSubnetA, !Ref AppSubnetB, !Ref AppSubnetC]
+      SecurityGroupIds: [!Ref VpceSg]
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.elasticloadbalancing
+
+  # -------------------------------------------------------------- Flow logs → S3
+  FlowLogs:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      ResourceType: VPC
+      ResourceId: !Ref Vpc
+      TrafficType: ALL
+      LogDestinationType: s3
+      LogDestination: !Sub arn:aws:s3:::platform-build-metadata-${AWS::AccountId}-${EnvironmentName}/vpc-flow-logs/
+
+  # -------------------------------------------------------------- SSM wiring
+  SsmVpcId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/network/vpc-id
+      Type: String
+      Value: !Ref Vpc
+  SsmPublicSubnets:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/network/public-subnets
+      Type: StringList
+      Value: !Join [",", [!Ref PublicSubnetA, !Ref PublicSubnetB, !Ref PublicSubnetC]]
+  SsmAppSubnets:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/network/app-subnets
+      Type: StringList
+      Value: !Join [",", [!Ref AppSubnetA, !Ref AppSubnetB, !Ref AppSubnetC]]
+  SsmDataSubnets:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/network/data-subnets
+      Type: StringList
+      Value: !Join [",", [!Ref DataSubnetA, !Ref DataSubnetB, !Ref DataSubnetC]]
+  SsmAlbSg:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/network/sg-alb
+      Type: String
+      Value: !Ref AlbSg
+  SsmEcsSg:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/network/sg-ecs
+      Type: String
+      Value: !Ref EcsSg
+  SsmRdsSg:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/network/sg-rds
+      Type: String
+      Value: !Ref RdsSg
+  SsmLokiSg:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/network/sg-loki
+      Type: String
+      Value: !Ref LokiSg
+  SsmTempoSg:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/network/sg-tempo
+      Type: String
+      Value: !Ref TempoSg
+
+Outputs:
+  VpcId: { Value: !Ref Vpc }
+  AppSubnets: { Value: !Join [",", [!Ref AppSubnetA, !Ref AppSubnetB, !Ref AppSubnetC]] }

@@ -1,0 +1,115 @@
+# Deploy stacks (7.05). dev auto after images build; stg after dev; prod behind manual
+# environment approval. Stack order: network → data → auth → compute.
+name: deploy
+
+on:
+  workflow_run:
+    workflows: [build-images]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [platform-dev, platform-stg, platform-prod]
+        default: platform-dev
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  deploy-dev:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: platform-dev
+    concurrency:
+      group: deploy-platform-dev # never two overlapping deploys per env (7.05 enhancement)
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          role-to-assume: ${{ vars.CI_DEPLOY_ROLE_ARN }}
+          role-session-name: ${{ github.actor }}-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy stacks in order
+        run: |
+          set -euo pipefail
+          ENV=dev
+          SHA=$(git rev-parse --short HEAD)
+          deploy() {
+            local name="$1" template="$2"; shift 2
+            echo "::group::Deploy platform-${name}-${ENV}"
+            aws cloudformation deploy \
+              --stack-name "platform-${name}-${ENV}" \
+              --template-file "$template" \
+              --capabilities CAPABILITY_NAMED_IAM \
+              --no-fail-on-empty-changeset \
+              --parameter-overrides EnvironmentName="${ENV}" "$@"
+            echo "::endgroup::"
+          }
+          deploy network infrastructure/platform/network.yaml
+          deploy data infrastructure/platform/data.yaml
+          deploy auth infrastructure/platform/auth.yaml
+          deploy compute infrastructure/platform/compute.yaml ImageTag="${SHA}" Scale=dev
+
+      - name: Roll ECS services and wait for stability
+        run: |
+          CLUSTER=$(aws ssm get-parameter --name /platform/dev/ecs-cluster --query 'Parameter.Value' --output text)
+          for SVC in api worker web-ui; do
+            aws ecs update-service --cluster "$CLUSTER" --service "$SVC" --force-new-deployment >/dev/null
+          done
+          aws ecs wait services-stable --cluster "$CLUSTER" --services api worker web-ui
+
+      - name: Post-deploy smoke test
+        run: |
+          ALB=$(aws ssm get-parameter --name /platform/dev/alb-dns --query 'Parameter.Value' --output text)
+          curl --retry 5 --retry-delay 10 -fsS "http://${ALB}/healthz"
+          curl --retry 5 --retry-delay 10 -fsS "http://${ALB}/api/v1/me" -o /dev/null -w '%{http_code}\n' | grep -E '200|401'
+
+      - name: Record deployed SHA (rollback + dashboards read this)
+        run: |
+          aws ssm put-parameter --name /platform/dev/deployed-sha \
+            --value "$(git rev-parse --short HEAD)" --type String --overwrite
+
+  deploy-stg:
+    needs: deploy-dev
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: platform-stg
+    concurrency:
+      group: deploy-platform-stg
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
+      - name: Placeholder
+        run: echo "STG deploy mirrors dev with EnvironmentName=stg once the stg account exists (phase 4)."
+
+  deploy-prod:
+    needs: deploy-stg
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: platform-prod # manual approval gate lives on this GitHub environment
+    concurrency:
+      group: deploy-platform-prod
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
+      - name: Placeholder
+        run: echo "PROD deploy mirrors dev with Scale=prod, DbTier=provisioned, NatStrategy=per-az (phase 4)."

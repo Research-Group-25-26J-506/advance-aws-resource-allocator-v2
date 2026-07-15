@@ -1,0 +1,32 @@
+# Java / Gradle
+backend/**/build/
+backend/.gradle/
+*.class
+*.jar
+!backend/gradle/wrapper/gradle-wrapper.jar
+
+# Node
+node_modules/
+frontend/dist/
+frontend/coverage/
+*.tsbuildinfo
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Env / secrets — never commit credentials
+.env
+.env.*
+!.env.example
+*.pem
+
+# Local dev state
+dev/.data/
+localstack-volume/
+
+# Build metadata
+*.log

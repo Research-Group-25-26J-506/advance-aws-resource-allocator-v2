@@ -1,0 +1,144 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Platform auth (6.05). Cognito user pool + app clients. Self-signup disabled — users are
+  provisioned by admins. Groups drive RBAC in both the API (@PreAuthorize) and the UI (RequireRole).
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [dev, stg, prod]
+  WebCallbackUrls:
+    Type: CommaDelimitedList
+    Default: http://localhost:5173/auth/callback
+    Description: Per-env callback URLs for the web app client
+  WebLogoutUrls:
+    Type: CommaDelimitedList
+    Default: http://localhost:5173/
+
+Conditions:
+  IsProd: !Equals [!Ref EnvironmentName, prod]
+
+Resources:
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub platform-users-${EnvironmentName}
+      MfaConfiguration: OPTIONAL
+      EnabledMfas: [SOFTWARE_TOKEN_MFA]
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true   # internal platform: no self-signup
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+      UserPoolAddOns:
+        AdvancedSecurityMode: !If [IsProd, ENFORCED, AUDIT]
+      AutoVerifiedAttributes: [email]
+      UsernameAttributes: [email]
+      Schema:
+        - { Name: email, Required: true, Mutable: true }
+        - { Name: team_id, AttributeDataType: String, Mutable: true }
+        - { Name: cost_center, AttributeDataType: String, Mutable: true }
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref UserPool
+      Domain: !Sub platform-auth-${AWS::AccountId}-${EnvironmentName}
+
+  GroupPlatformAdmin:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties: { UserPoolId: !Ref UserPool, GroupName: PLATFORM_ADMIN, Precedence: 0 }
+  GroupTemplateAdmin:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties: { UserPoolId: !Ref UserPool, GroupName: TEMPLATE_ADMIN, Precedence: 1 }
+  GroupApprover:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties: { UserPoolId: !Ref UserPool, GroupName: APPROVER, Precedence: 2 }
+  GroupUser:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties: { UserPoolId: !Ref UserPool, GroupName: USER, Precedence: 3 }
+
+  SyncResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Properties:
+      UserPoolId: !Ref UserPool
+      Identifier: platform-sync
+      Name: Template sync
+      Scopes:
+        - { ScopeName: trigger, ScopeDescription: Trigger template sync from CI }
+
+  WebAppClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: web-app
+      GenerateSecret: false                    # public client: PKCE only
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, email, profile]
+      CallbackURLs: !Ref WebCallbackUrls
+      LogoutURLs: !Ref WebLogoutUrls
+      SupportedIdentityProviders: [COGNITO]
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      AccessTokenValidity: 60
+      IdTokenValidity: 60
+      RefreshTokenValidity: 12
+      TokenValidityUnits: { AccessToken: minutes, IdToken: minutes, RefreshToken: hours }
+
+  ApiServerClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: api-server
+      GenerateSecret: true                     # M2M testing only
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [client_credentials]
+      AllowedOAuthScopes: [platform-sync/trigger]
+      SupportedIdentityProviders: [COGNITO]
+
+  SystemSyncClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: system-sync                  # used by the 7.08 sync-trigger workflow
+      GenerateSecret: true
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [client_credentials]
+      AllowedOAuthScopes: [platform-sync/trigger]
+      SupportedIdentityProviders: [COGNITO]
+
+  # ---------------------------------------------------------------- SSM wiring
+  SsmUserPoolId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/auth/user-pool-id
+      Type: String
+      Value: !Ref UserPool
+  SsmUserPoolIssuer:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/auth/issuer-uri
+      Type: String
+      Value: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}
+  SsmWebClientId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/auth/web-client-id
+      Type: String
+      Value: !Ref WebAppClient
+  SsmAuthDomain:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/auth/domain
+      Type: String
+      Value: !Sub https://platform-auth-${AWS::AccountId}-${EnvironmentName}.auth.${AWS::Region}.amazoncognito.com
+
+Outputs:
+  UserPoolId: { Value: !Ref UserPool }
+  WebClientId: { Value: !Ref WebAppClient }
+  IssuerUri: { Value: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}" }

@@ -1,0 +1,10 @@
+# Default owners for anything not matched below
+*                   @your-org/platform-team
+
+# Per-directory ownership (7.01)
+/infrastructure/    @your-org/platform-team
+/backend/           @your-org/backend-team
+/frontend/          @your-org/frontend-team
+/templates/         @your-org/template-admins
+/.github/           @your-org/platform-team
+/docs/adr/          @your-org/platform-team
