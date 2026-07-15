@@ -1,4 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::SecretsManager-2020-07-23   # required by HostedRotationLambda
 Description: >-
   Platform data tier (6.03). Aurora MySQL 8 (Serverless v2 in dev, provisioned Multi-AZ in prod),
   RDS Proxy, SQS + DLQ, DynamoDB idempotency + lock tables. Wiring via SSM /platform/{env}/...
@@ -17,6 +18,9 @@ Parameters:
   DataSubnetsParam:
     Type: AWS::SSM::Parameter::Value<List<String>>
     Default: /platform/dev/network/data-subnets
+  AppSubnetsParam:
+    Type: AWS::SSM::Parameter::Value<List<String>>
+    Default: /platform/dev/network/app-subnets
 
 Conditions:
   IsProvisioned: !Equals [!Ref DbTier, provisioned]
@@ -114,8 +118,10 @@ Resources:
       SecretId: !Ref DbMasterSecret
       HostedRotationLambda:
         RotationType: MySQLSingleUser
-        VpcSecurityGroupIds: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-rds}}"
-        VpcSubnetIds: !Join [",", !Ref DataSubnetsParam]
+        # App subnets, not data: the rotation Lambda needs egress to Secrets Manager (via NAT),
+        # and sg-ecs is allowed through to the DB on 3306 by sg-rds.
+        VpcSecurityGroupIds: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-ecs}}"
+        VpcSubnetIds: !Join [",", !Ref AppSubnetsParam]
       RotationRules:
         AutomaticallyAfterDays: 90
 

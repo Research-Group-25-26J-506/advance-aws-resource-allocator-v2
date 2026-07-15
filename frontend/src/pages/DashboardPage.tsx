@@ -124,16 +124,32 @@ export default function DashboardPage() {
 }
 
 function KpiCard({ title, kpi, href }: { title: string; kpi?: Kpi; href: string }) {
-  const arrow = kpi?.direction === "up" ? "↑" : kpi?.direction === "down" ? "↓" : "→";
+  const direction = kpi?.direction ?? "flat";
+  const arrow = direction === "up" ? "▲" : direction === "down" ? "▼" : "–";
+  const deltaColor =
+    direction === "up" ? "text-status-success" : direction === "down" ? "text-status-error" : "text-status-inactive";
   return (
-    <Container>
-      <Box variant="awsui-key-label">{title}</Box>
-      <Link href={href} fontSize="display-l" variant="primary">
-        {kpi ? String(kpi.value) : "—"}
-      </Link>
-      <Box color="text-status-inactive" fontSize="body-s">
-        {kpi ? `${arrow} ${kpi.delta_pct}% vs previous period` : "loading"}
-      </Box>
+    <Container fitHeight>
+      <SpaceBetween size="xs">
+        <Box variant="awsui-key-label">{title}</Box>
+        <Link href={href} fontSize="display-l" variant="primary">
+          {kpi ? String(kpi.value) : "—"}
+        </Link>
+        {kpi ? (
+          <SpaceBetween direction="horizontal" size="xxs">
+            <Box color={deltaColor} fontSize="body-s" fontWeight="bold">
+              {arrow} {Math.abs(kpi.delta_pct)}%
+            </Box>
+            <Box color="text-status-inactive" fontSize="body-s">
+              vs previous period
+            </Box>
+          </SpaceBetween>
+        ) : (
+          <Box color="text-status-inactive" fontSize="body-s">
+            loading…
+          </Box>
+        )}
+      </SpaceBetween>
     </Container>
   );
 }
