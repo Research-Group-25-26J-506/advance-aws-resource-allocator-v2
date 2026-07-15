@@ -30,7 +30,8 @@ public class JwtSecurityConfig {
         http.csrf(csrf -> csrf.disable()) // pure bearer-token API: no session, no CSRF surface
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth.requestMatchers(
-                                "/actuator/health/**", "/openapi.json", "/api/v1/webhooks/github")
+                                "/actuator/health/**", "/openapi.json", "/api/v1/webhooks/github",
+                                "/api/v1/config")
                         .permitAll()
                         .anyRequest()
                         .authenticated())
@@ -46,7 +47,16 @@ public class JwtSecurityConfig {
                     : groups.stream()
                             .map(g -> (GrantedAuthority) new SimpleGrantedAuthority("ROLE_" + g))
                             .collect(Collectors.toList());
-            return new JwtAuthenticationToken(jwt, authorities, jwt.getClaimAsString("email"));
+            // Access tokens carry no email claim — fall back to username, then sub, so
+            // getName() (used as requester id/email) is never null.
+            String name = jwt.getClaimAsString("email");
+            if (name == null) {
+                name = jwt.getClaimAsString("username");
+            }
+            if (name == null) {
+                name = jwt.getSubject();
+            }
+            return new JwtAuthenticationToken(jwt, authorities, name);
         };
     }
 }

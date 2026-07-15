@@ -1,0 +1,53 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  CloudFront in front of the ALB (shared-context architecture). Gives the platform HTTPS on the
+  default *.cloudfront.net domain - required for Cognito callback URLs - until a custom domain
+  + ACM cert exist. API paths are never cached; static assets use the optimized cache policy.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [dev, stg, prod]
+
+Resources:
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub platform-${EnvironmentName}
+        HttpVersion: http2
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: alb
+            DomainName: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/alb-dns}}"
+            CustomOriginConfig:
+              OriginProtocolPolicy: http-only   # ALB has no cert; TLS terminates at CloudFront
+              OriginReadTimeout: 60             # SSE-friendly (max without quota increase)
+              OriginKeepaliveTimeout: 60
+        DefaultCacheBehavior:
+          TargetOriginId: alb
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+          # CachingDisabled + AllViewer: the SPA shell and API are always dynamic
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3
+        CacheBehaviors:
+          - PathPattern: /assets/*
+            TargetOriginId: alb
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            # CachingOptimized: hashed immutable bundle files
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+  SsmCdnDomain:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/cdn-domain
+      Type: String
+      Value: !GetAtt Distribution.DomainName
+
+Outputs:
+  CdnDomain: { Value: !GetAtt Distribution.DomainName }
