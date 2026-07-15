@@ -214,7 +214,10 @@ Resources:
                   - IsProd
                   # prod deploys only from jobs inside the protected environment
                   - !Sub repo:${GitHubOrg}/${GitHubRepo}:environment:platform-prod
-                  - !Sub repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/${DeployBranch}
+                  # jobs WITH an environment: get "environment:" subs; jobs without get "ref:" subs
+                  - - !Sub repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/${DeployBranch}
+                    - !Sub repo:${GitHubOrg}/${GitHubRepo}:environment:platform-dev
+                    - !Sub repo:${GitHubOrg}/${GitHubRepo}:environment:platform-stg
       Policies:
         - PolicyName: deploy
           PolicyDocument:
