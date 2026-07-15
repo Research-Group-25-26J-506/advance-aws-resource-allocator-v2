@@ -9,6 +9,7 @@ import type {
   Template,
   TemplateDetail,
 } from "./types";
+import { accessToken } from "../auth/auth";
 import { mockHandler } from "../mocks/mockApi";
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === "true";
@@ -38,6 +39,10 @@ async function call<T>(method: string, path: string, body?: unknown, idempotency
     "Content-Type": "application/json",
     traceparent: traceparent(),
   };
+  const token = accessToken();
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
   if (idempotencyKey) {
     headers["Idempotency-Key"] = idempotencyKey;
   }

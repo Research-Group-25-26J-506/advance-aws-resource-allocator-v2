@@ -9,6 +9,7 @@ import Spinner from "@cloudscape-design/components/spinner";
 import TopNavigation from "@cloudscape-design/components/top-navigation";
 import { api } from "./api/client";
 import type { Me } from "./api/types";
+import { initAuth, signOut } from "./auth/auth";
 import { MeContext, hasRole } from "./auth/useMe";
 import RequireRole from "./components/RequireRole";
 import { getDensity, getMode, toggleDensity, toggleMode } from "./theme";
@@ -19,6 +20,7 @@ const CatalogPage = lazy(() => import("./pages/CatalogPage"));
 const CreateResourceWizard = lazy(() => import("./pages/CreateResourceWizard"));
 const RequestsListPage = lazy(() => import("./pages/RequestsListPage"));
 const RequestDetailPage = lazy(() => import("./pages/RequestDetailPage"));
+const AuthCallbackPage = lazy(() => import("./pages/AuthCallbackPage"));
 
 export default function App() {
   const [me, setMe] = useState<Me | null>(null);
@@ -29,7 +31,9 @@ export default function App() {
   const location = useLocation();
 
   useEffect(() => {
-    api.me()
+    // Auth gate first: in cognito mode this may redirect to the Hosted UI and never resolve.
+    initAuth()
+      .then(() => api.me())
       .then(setMe)
       .catch(() =>
         setNotifications([
@@ -90,6 +94,9 @@ export default function App() {
             text: me?.email ?? "…",
             iconName: "user-profile",
             items: [{ id: "signout", text: "Sign out" }],
+            onItemClick: (e) => {
+              if (e.detail.id === "signout") signOut();
+            },
           },
         ]}
       />
@@ -126,6 +133,7 @@ export default function App() {
             }
           >
             <Routes>
+              <Route path="/auth/callback" element={<AuthCallbackPage />} />
               <Route path="/" element={<DashboardPage />} />
               <Route path="/catalog" element={<CatalogPage />} />
               <Route path="/catalog/:templateId" element={<CreateResourceWizard />} />
