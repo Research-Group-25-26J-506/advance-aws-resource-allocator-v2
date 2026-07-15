@@ -5,6 +5,8 @@ import java.util.function.Consumer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.awscore.client.builder.AwsClientBuilder;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.cloudformation.CloudFormationClient;
@@ -32,6 +34,10 @@ public class AwsClientsConfig {
             builder.region(Region.of(region));
             if (!endpointOverride.isBlank()) {
                 builder.endpointOverride(URI.create(endpointOverride));
+                // LocalStack mode: pin dummy credentials so local runs NEVER read (or need)
+                // the developer's real ~/.aws credentials.
+                builder.credentialsProvider(
+                        StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test")));
             }
         };
     }
