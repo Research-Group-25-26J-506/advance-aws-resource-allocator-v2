@@ -46,12 +46,13 @@ public class SqsWorkQueue implements WorkQueue {
                                 .dataType("String")
                                 .stringValue(value)
                                 .build()));
+        final String body;
         try {
-            sqs.sendMessage(b -> b.queueUrl(queueUrl)
-                    .messageBody(mapper.writeValueAsString(message))
-                    .messageAttributes(attributes));
+            body = mapper.writeValueAsString(message);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Failed to serialise work message", e);
         }
+        sqs.sendMessage(
+                b -> b.queueUrl(queueUrl).messageBody(body).messageAttributes(attributes));
     }
 }

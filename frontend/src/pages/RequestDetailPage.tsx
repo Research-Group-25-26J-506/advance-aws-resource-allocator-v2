@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import Alert from "@cloudscape-design/components/alert";
 import Badge from "@cloudscape-design/components/badge";
 import Box from "@cloudscape-design/components/box";
@@ -27,7 +27,6 @@ import { localWithUtcTitle } from "../util/time";
  */
 export default function RequestDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [request, setRequest] = useState<PlatformRequest | null>(null);
   const [events, setEvents] = useState<RequestEvent[]>([]);

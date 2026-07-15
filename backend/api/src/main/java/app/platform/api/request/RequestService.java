@@ -122,6 +122,12 @@ public class RequestService {
         return requests.findByRequester(actorId, limit);
     }
 
+    @Transactional(readOnly = true)
+    public List<app.platform.domain.model.RequestEvent> listEvents(UUID id) {
+        get(id); // 404 if unknown
+        return requests.listEvents(id);
+    }
+
     @Transactional
     public Request retry(String actorId, UUID id) {
         Request request = get(id);

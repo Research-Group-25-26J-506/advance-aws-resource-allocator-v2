@@ -12,6 +12,11 @@ Parameters:
     AllowedValues: [serverless, provisioned]
     Default: serverless
     Description: serverless = v2 min 0.5 ACU single instance (dev); provisioned = Multi-AZ t4g.medium pair (~$120/mo)
+  # Fn::Split can't consume {{resolve:ssm:...}} strings, so subnet lists arrive via SSM
+  # parameter TYPES — the deploy workflow overrides the parameter name per environment.
+  DataSubnetsParam:
+    Type: AWS::SSM::Parameter::Value<List<String>>
+    Default: /platform/dev/network/data-subnets
 
 Conditions:
   IsProvisioned: !Equals [!Ref DbTier, provisioned]
@@ -35,9 +40,7 @@ Resources:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
       DBSubnetGroupDescription: Platform data subnets
-      SubnetIds: !Split
-        - ","
-        - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/data-subnets}}"
+      SubnetIds: !Ref DataSubnetsParam
 
   DbCluster:
     Type: AWS::RDS::DBCluster
@@ -45,7 +48,7 @@ Resources:
     UpdateReplacePolicy: Snapshot
     Properties:
       Engine: aurora-mysql
-      EngineVersion: "8.0.mysql_aurora.3.05.2"
+      EngineVersion: "8.0.mysql_aurora.3.08.2"
       DatabaseName: platform
       MasterUsername: !Sub "{{resolve:secretsmanager:${DbMasterSecret}:SecretString:username}}"
       MasterUserPassword: !Sub "{{resolve:secretsmanager:${DbMasterSecret}:SecretString:password}}"
@@ -112,7 +115,7 @@ Resources:
       HostedRotationLambda:
         RotationType: MySQLSingleUser
         VpcSecurityGroupIds: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-rds}}"
-        VpcSubnetIds: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/data-subnets}}"
+        VpcSubnetIds: !Join [",", !Ref DataSubnetsParam]
       RotationRules:
         AutomaticallyAfterDays: 90
 
@@ -142,9 +145,7 @@ Resources:
       RoleArn: !GetAtt RdsProxyRole.Arn
       Auth:
         - { AuthScheme: SECRETS, SecretArn: !Ref DbMasterSecret, IAMAuth: DISABLED }
-      VpcSubnetIds: !Split
-        - ","
-        - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/data-subnets}}"
+      VpcSubnetIds: !Ref DataSubnetsParam
       VpcSecurityGroupIds:
         - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-rds}}"
       RequireTLS: true

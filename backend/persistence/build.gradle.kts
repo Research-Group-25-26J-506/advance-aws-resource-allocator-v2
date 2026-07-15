@@ -4,7 +4,8 @@ plugins {
 
 dependencies {
     api(project(":domain"))
-    implementation("org.springframework.boot:spring-boot-starter-data-jpa")
+    // api, not implementation: SpringDataRepos exposes JpaRepository types to :api and :worker
+    api("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("com.fasterxml.jackson.core:jackson-databind")
     implementation("org.flywaydb:flyway-core")
     implementation("org.flywaydb:flyway-mysql")
