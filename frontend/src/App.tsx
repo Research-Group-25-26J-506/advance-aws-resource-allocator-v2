@@ -11,6 +11,7 @@ import { api } from "./api/client";
 import type { Me } from "./api/types";
 import { MeContext, hasRole } from "./auth/useMe";
 import RequireRole from "./components/RequireRole";
+import { getDensity, getMode, toggleDensity, toggleMode } from "./theme";
 
 // Route-level code splitting (2.01 enhancement); suspense fallback is a Cloudscape Spinner.
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
@@ -22,6 +23,8 @@ const RequestDetailPage = lazy(() => import("./pages/RequestDetailPage"));
 export default function App() {
   const [me, setMe] = useState<Me | null>(null);
   const [notifications, setNotifications] = useState<FlashbarProps.MessageDefinition[]>([]);
+  const [mode, setMode] = useState(getMode());
+  const [density, setDensity] = useState(getDensity());
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -65,6 +68,23 @@ export default function App() {
       <TopNavigation
         identity={{ href: "/", title: "AWS Self-Service Platform" }}
         utilities={[
+          {
+            type: "menu-dropdown",
+            iconName: "settings",
+            ariaLabel: "Display settings",
+            title: "Display",
+            items: [
+              { id: "mode", text: mode === "dark" ? "Switch to light mode" : "Switch to dark mode" },
+              {
+                id: "density",
+                text: density === "compact" ? "Switch to comfortable density" : "Switch to compact density",
+              },
+            ],
+            onItemClick: (e) => {
+              if (e.detail.id === "mode") setMode(toggleMode());
+              if (e.detail.id === "density") setDensity(toggleDensity());
+            },
+          },
           {
             type: "menu-dropdown",
             text: me?.email ?? "…",

@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Platform-managed Lambda function scaffold — least-privilege role, log group with retention,
+  placeholder code (deploy real code via CI afterwards).
+
+Parameters:
+  FunctionName:
+    Type: String
+    AllowedPattern: "^[a-zA-Z0-9-_]{1,64}$"
+  Runtime:
+    Type: String
+    AllowedValues: [python3.12, nodejs20.x]
+    Default: python3.12
+  MemorySize:
+    Type: Number
+    Default: 256
+    MinValue: 128
+    MaxValue: 10240
+  TimeoutSeconds:
+    Type: Number
+    Default: 30
+    MinValue: 1
+    MaxValue: 900
+
+Conditions:
+  IsPython: !Equals [!Ref Runtime, python3.12]
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${FunctionName}
+      RetentionInDays: 30
+
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt LogGroup.Arn
+
+  Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref FunctionName
+      Runtime: !Ref Runtime
+      Handler: index.handler
+      MemorySize: !Ref MemorySize
+      Timeout: !Ref TimeoutSeconds
+      Role: !GetAtt ExecutionRole.Arn
+      Code:
+        ZipFile: !If
+          - IsPython
+          - |
+            def handler(event, context):
+                return {"statusCode": 200, "body": "placeholder - deploy real code via CI"}
+          - |
+            exports.handler = async () => ({ statusCode: 200, body: "placeholder - deploy real code via CI" });
+
+Outputs:
+  FunctionArn: { Value: !GetAtt Function.Arn }
+  FunctionName: { Value: !Ref Function }
+  RoleArn: { Value: !GetAtt ExecutionRole.Arn }

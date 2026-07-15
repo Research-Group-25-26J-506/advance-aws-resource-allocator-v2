@@ -1,0 +1,51 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Platform-managed SNS topic — encrypted at rest, optional FIFO.
+
+Parameters:
+  TopicName:
+    Type: String
+    AllowedPattern: "^[a-zA-Z0-9_-]{1,250}$"
+  TopicDisplayName:
+    Type: String
+    Default: ""
+  FifoTopic:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+
+Conditions:
+  IsFifo: !Equals [!Ref FifoTopic, "true"]
+  HasDisplayName: !Not [!Equals [!Ref TopicDisplayName, ""]]
+
+Resources:
+  Topic:
+    Type: AWS::SNS::Topic
+    Properties:
+      # FIFO topic names must end in .fifo
+      TopicName: !If [IsFifo, !Sub "${TopicName}.fifo", !Ref TopicName]
+      DisplayName: !If [HasDisplayName, !Ref TopicDisplayName, !Ref AWS::NoValue]
+      FifoTopic: !If [IsFifo, true, !Ref AWS::NoValue]
+      ContentBasedDeduplication: !If [IsFifo, true, !Ref AWS::NoValue]
+      KmsMasterKeyId: alias/aws/sns
+
+  TopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [!Ref Topic]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: sns:Publish
+            Resource: !Ref Topic
+            Condition: { Bool: { "aws:SecureTransport": "false" } }
+          - Sid: OwnerAccountPublish
+            Effect: Allow
+            Principal: { AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root" }
+            Action: [sns:Publish, sns:Subscribe]
+            Resource: !Ref Topic
+
+Outputs:
+  TopicArn: { Value: !Ref Topic }

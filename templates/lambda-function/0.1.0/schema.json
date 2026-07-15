@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Lambda Function",
+  "type": "object",
+  "required": ["functionName"],
+  "additionalProperties": false,
+  "properties": {
+    "functionName": {
+      "type": "string",
+      "title": "Function name",
+      "pattern": "^[a-zA-Z0-9-_]{1,64}$"
+    },
+    "runtime": {
+      "type": "string",
+      "title": "Runtime",
+      "enum": ["python3.12", "nodejs20.x"],
+      "default": "python3.12"
+    },
+    "memorySize": {
+      "type": "integer",
+      "title": "Memory (MB)",
+      "minimum": 128,
+      "maximum": 10240,
+      "default": 256,
+      "x-help": "CPU scales with memory; 256MB fits most glue functions."
+    },
+    "timeoutSeconds": {
+      "type": "integer",
+      "title": "Timeout (seconds)",
+      "minimum": 1,
+      "maximum": 900,
+      "default": 30
+    }
+  }
+}

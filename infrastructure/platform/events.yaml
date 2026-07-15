@@ -1,0 +1,132 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  CFN event listener wiring (3.05). EventBridge rule for CloudFormation Stack Status Change ->
+  Lambda (in the app subnets, via RDS Proxy) -> Aurora. On-failure destination SQS + alarm so a
+  dropped event never silently strands a request in *_IN_PROGRESS.
+  Deploy AFTER data.yaml. The Lambda artifact is built by CI (build-images) and uploaded to the
+  build-metadata bucket; CodeKey points at it.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [dev, stg, prod]
+  CodeKey:
+    Type: String
+    Default: lambdas/cfn-event-listener.zip
+    Description: S3 key of the packaged Lambda in the build-metadata bucket
+  AppSubnetsParam:
+    Type: AWS::SSM::Parameter::Value<List<String>>
+    Default: /platform/dev/network/app-subnets
+
+Resources:
+  FailureDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub platform-cfn-events-dlq-${EnvironmentName}
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
+  ListenerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-${EnvironmentName}-cfn-listener-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: listener
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadDbSecret
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/db/secret-arn}}"
+              - Sid: ReadStackOutputs
+                Effect: Allow
+                Action: cloudformation:DescribeStacks
+                Resource: "*"
+              - Sid: FailureDestination
+                Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !GetAtt FailureDlq.Arn
+
+  ListenerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub platform-${EnvironmentName}-cfn-event-listener
+      Runtime: python3.12
+      Handler: handler.handler
+      Timeout: 30
+      MemorySize: 256
+      Role: !GetAtt ListenerRole.Arn
+      Code:
+        S3Bucket: !Sub platform-build-metadata-${AWS::AccountId}-${EnvironmentName}
+        S3Key: !Ref CodeKey
+      VpcConfig:
+        SubnetIds: !Ref AppSubnetsParam
+        SecurityGroupIds:
+          - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-ecs}}"
+      Environment:
+        Variables:
+          DB_HOST: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/db/proxy-endpoint}}"
+          DB_SECRET_ARN: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/db/secret-arn}}"
+          DB_NAME: platform
+      # ADOT layer (Python auto-instrumentation) is added by the deploy workflow per-region:
+      # arn:aws:lambda:<region>:901920570463:layer:aws-otel-python-<arch>-ver-*
+
+  ListenerEventInvokeConfig:
+    Type: AWS::Lambda::EventInvokeConfig
+    Properties:
+      FunctionName: !Ref ListenerFunction
+      Qualifier: $LATEST
+      MaximumRetryAttempts: 2
+      DestinationConfig:
+        OnFailure:
+          Destination: !GetAtt FailureDlq.Arn
+
+  StackEventsRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub platform-${EnvironmentName}-cfn-stack-events
+      Description: Top-level CloudFormation stack status changes -> listener Lambda
+      EventPattern:
+        source: [aws.cloudformation]
+        detail-type: [CloudFormation Stack Status Change]
+      State: ENABLED
+      Targets:
+        - Id: listener
+          Arn: !GetAtt ListenerFunction.Arn
+
+  RulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ListenerFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt StackEventsRule.Arn
+
+  DlqDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub platform-${EnvironmentName}-cfn-events-dlq-depth
+      AlarmDescription: CFN status events are failing to apply — requests may be stranded IN_PROGRESS
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - { Name: QueueName, Value: !GetAtt FailureDlq.QueueName }
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+Outputs:
+  ListenerFunctionArn: { Value: !GetAtt ListenerFunction.Arn }
+  FailureDlqUrl: { Value: !Ref FailureDlq }

@@ -1,0 +1,63 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Platform-managed DynamoDB table — on-demand billing, SSE, optional sort key and PITR.
+
+Parameters:
+  TableName:
+    Type: String
+    AllowedPattern: "^[a-zA-Z0-9_.-]{3,255}$"
+  PartitionKeyName:
+    Type: String
+    Default: pk
+  PartitionKeyType:
+    Type: String
+    AllowedValues: [S, N, B]
+    Default: S
+  SortKeyName:
+    Type: String
+    Default: ""
+    Description: Empty = no sort key
+  SortKeyType:
+    Type: String
+    AllowedValues: [S, N, B]
+    Default: S
+  PitrEnabled:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+  TtlAttribute:
+    Type: String
+    Default: ""
+    Description: Empty = TTL disabled
+
+Conditions:
+  HasSortKey: !Not [!Equals [!Ref SortKeyName, ""]]
+  HasTtl: !Not [!Equals [!Ref TtlAttribute, ""]]
+  Pitr: !Equals [!Ref PitrEnabled, "true"]
+
+Resources:
+  Table:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref TableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: !If
+        - HasSortKey
+        - - { AttributeName: !Ref PartitionKeyName, AttributeType: !Ref PartitionKeyType }
+          - { AttributeName: !Ref SortKeyName, AttributeType: !Ref SortKeyType }
+        - - { AttributeName: !Ref PartitionKeyName, AttributeType: !Ref PartitionKeyType }
+      KeySchema: !If
+        - HasSortKey
+        - - { AttributeName: !Ref PartitionKeyName, KeyType: HASH }
+          - { AttributeName: !Ref SortKeyName, KeyType: RANGE }
+        - - { AttributeName: !Ref PartitionKeyName, KeyType: HASH }
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: !If [Pitr, true, false]
+      SSESpecification: { SSEEnabled: true }
+      TimeToLiveSpecification: !If
+        - HasTtl
+        - { AttributeName: !Ref TtlAttribute, Enabled: true }
+        - !Ref AWS::NoValue
+
+Outputs:
+  TableName: { Value: !Ref Table }
+  TableArn: { Value: !GetAtt Table.Arn }
