@@ -1,0 +1,25 @@
+# Minimal ADOT sidecar config, stored at SSM /platform/otel/sidecar/config (6.04).
+# Placeholder pipeline until the 4.x observability stack lands: accept OTLP, batch, drop to
+# debug logging — services can emit telemetry from day one without a backend.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+processors:
+  batch: {}
+exporters:
+  debug:
+    verbosity: basic
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]

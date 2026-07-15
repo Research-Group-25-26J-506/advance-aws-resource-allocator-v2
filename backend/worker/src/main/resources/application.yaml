@@ -7,10 +7,10 @@ spring:
     password: ${PLATFORM_DB_PASSWORD:}
   jpa:
     hibernate:
-      ddl-auto: validate
+      ddl-auto: none   # api owns migrations; validate here races the api's first Flyway run
     open-in-view: false
   flyway:
-    enabled: false   # the api service owns migrations; worker only validates
+    enabled: false
   lifecycle:
     timeout-per-shutdown-phase: 60s   # drain in-flight SQS handlers
 

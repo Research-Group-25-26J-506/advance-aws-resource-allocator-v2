@@ -268,7 +268,7 @@ Resources:
       NetworkMode: awsvpc
       ExecutionRoleArn: !GetAtt ExecutionRole.Arn
       TaskRoleArn: !GetAtt ApiTaskRole.Arn
-      RuntimePlatform: { CpuArchitecture: ARM64, OperatingSystemFamily: LINUX }
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
       ContainerDefinitions:
         - Name: api
           Image: !Sub
@@ -280,6 +280,17 @@ Resources:
             - { Name: SPRING_PROFILES_ACTIVE, Value: !Ref EnvironmentName }
             - { Name: PLATFORM_ENV, Value: !Ref EnvironmentName }
             - { Name: OTEL_EXPORTER_OTLP_ENDPOINT, Value: http://localhost:4317 }
+            - { Name: AWS_REGION, Value: !Ref AWS::Region }
+            - { Name: PLATFORM_DB_HOST, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/db/proxy-endpoint}}" }
+            - { Name: PLATFORM_REQUESTS_QUEUE_URL, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/sqs/requests-queue-url}}" }
+            - { Name: PLATFORM_TEMPLATES_BUCKET, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/templates-bucket}}" }
+            - { Name: PLATFORM_IDEMPOTENCY_TABLE, Value: !Sub "platform-idempotency-${EnvironmentName}" }
+            - { Name: PLATFORM_COGNITO_ISSUER, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/auth/issuer-uri}}" }
+          Secrets:
+            - Name: PLATFORM_DB_USER
+              ValueFrom: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/db/secret-arn}}:username::"
+            - Name: PLATFORM_DB_PASSWORD
+              ValueFrom: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/db/secret-arn}}:password::"
           StopTimeout: 30
           LogConfiguration:
             LogDriver: awslogs
@@ -314,7 +325,7 @@ Resources:
       NetworkMode: awsvpc
       ExecutionRoleArn: !GetAtt ExecutionRole.Arn
       TaskRoleArn: !GetAtt WorkerTaskRole.Arn
-      RuntimePlatform: { CpuArchitecture: ARM64, OperatingSystemFamily: LINUX }
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
       ContainerDefinitions:
         - Name: worker
           Image: !Sub
@@ -325,6 +336,15 @@ Resources:
             - { Name: SPRING_PROFILES_ACTIVE, Value: !Ref EnvironmentName }
             - { Name: PLATFORM_ENV, Value: !Ref EnvironmentName }
             - { Name: OTEL_EXPORTER_OTLP_ENDPOINT, Value: http://localhost:4317 }
+            - { Name: AWS_REGION, Value: !Ref AWS::Region }
+            - { Name: PLATFORM_DB_HOST, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/db/proxy-endpoint}}" }
+            - { Name: PLATFORM_REQUESTS_QUEUE_URL, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/sqs/requests-queue-url}}" }
+            - { Name: PLATFORM_TEMPLATES_BUCKET, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/templates-bucket}}" }
+          Secrets:
+            - Name: PLATFORM_DB_USER
+              ValueFrom: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/db/secret-arn}}:username::"
+            - Name: PLATFORM_DB_PASSWORD
+              ValueFrom: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/db/secret-arn}}:password::"
           StopTimeout: 120   # graceful drain of in-flight SQS handlers (3.4)
           LogConfiguration:
             LogDriver: awslogs
@@ -355,7 +375,7 @@ Resources:
       NetworkMode: awsvpc
       ExecutionRoleArn: !GetAtt ExecutionRole.Arn
       TaskRoleArn: !GetAtt WebTaskRole.Arn
-      RuntimePlatform: { CpuArchitecture: ARM64, OperatingSystemFamily: LINUX }
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
       ContainerDefinitions:
         - Name: web-ui
           Image: !Sub
