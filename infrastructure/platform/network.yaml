@@ -264,6 +264,15 @@ Resources:
       SecurityGroupIngress:
         - { IpProtocol: tcp, FromPort: 3306, ToPort: 3306, SourceSecurityGroupId: !Ref EcsSg, Description: MySQL from ECS }
       Tags: [{ Key: Name, Value: !Sub "platform-${EnvironmentName}-sg-rds" }]
+  RdsSgSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RdsSg
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      SourceSecurityGroupId: !Ref RdsSg
+      Description: RDS Proxy to database (proxy ENIs share this SG)
 
   VpceSg:
     Type: AWS::EC2::SecurityGroup
