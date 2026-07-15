@@ -134,6 +134,12 @@ public class IdempotencyFilter extends OncePerRequestFilter {
     }
 
     private void storeResponse(String pk, ContentCachingResponseWrapper response, long reservedAt) {
+        // Never cache 5xx: a transient failure must not be replayed for 24h. Dropping the
+        // reservation lets the client retry with the same key and actually re-execute.
+        if (response.getStatus() >= 500) {
+            dynamo.deleteItem(b -> b.tableName(tableName).key(Map.of("pk", AttributeValue.fromS(pk))));
+            return;
+        }
         String bodyText = new String(response.getContentAsByteArray(), StandardCharsets.UTF_8);
         // DynamoDB 400KB item cap: oversized bodies should spill to S3 (pointer in item);
         // truncated storage keeps the filter safe until the S3 spill lands.

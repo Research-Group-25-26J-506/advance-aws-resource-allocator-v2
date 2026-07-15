@@ -17,6 +17,8 @@ public interface SpringDataRepos {
         List<RequestEntity> findByRequesterIdOrderBySubmittedAtDesc(String requesterId, Pageable pageable);
 
         Optional<RequestEntity> findByIdempotencyKey(String idempotencyKey);
+
+        Optional<RequestEntity> findByStackId(String stackId);
     }
 
     interface RequestEvents extends JpaRepository<RequestEventEntity, Long> {

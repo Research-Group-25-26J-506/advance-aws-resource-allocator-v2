@@ -2,9 +2,10 @@
 # One-time (idempotent) bootstrap apply. Usage: ./apply.sh <env> <github-org> [repo]
 set -euo pipefail
 
-ENV="${1:?Usage: apply.sh <dev|stg|prod> <github-org> [repo]}"
-ORG="${2:?Usage: apply.sh <dev|stg|prod> <github-org> [repo]}"
+ENV="${1:?Usage: apply.sh <dev|stg|prod> <github-org> [repo] [deploy-branch]}"
+ORG="${2:?Usage: apply.sh <dev|stg|prod> <github-org> [repo] [deploy-branch]}"
 REPO="${3:-platform}"
+BRANCH="${4:-develop}"
 STACK="platform-bootstrap-${ENV}"
 
 aws cloudformation deploy \
@@ -15,7 +16,8 @@ aws cloudformation deploy \
   --parameter-overrides \
     "EnvironmentName=${ENV}" \
     "GitHubOrg=${ORG}" \
-    "GitHubRepo=${REPO}"
+    "GitHubRepo=${REPO}" \
+    "DeployBranch=${BRANCH}"
 
 echo ""
 echo "Bootstrap applied. SSM parameters written under /platform/${ENV}/:"

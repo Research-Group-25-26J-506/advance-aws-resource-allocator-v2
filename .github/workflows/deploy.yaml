@@ -6,7 +6,7 @@ on:
   workflow_run:
     workflows: [build-images]
     types: [completed]
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
     inputs:
       environment:

@@ -10,7 +10,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 
 @SpringBootApplication(scanBasePackages = "app.platform")
-@EnableJpaRepositories(basePackages = "app.platform.persistence")
+// considerNestedRepositories: the repo interfaces are nested inside SpringDataRepos
+@EnableJpaRepositories(basePackages = "app.platform.persistence", considerNestedRepositories = true)
 @EntityScan(basePackages = "app.platform.persistence.entity")
 public class PlatformWorkerApplication {
 

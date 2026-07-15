@@ -14,6 +14,8 @@ public interface RequestRepository {
 
     Optional<Request> findById(UUID id);
 
+    Optional<Request> findByStackId(String stackId);
+
     List<Request> findByRequester(String requesterId, int limit);
 
     /** Append-only lifecycle event; source is "PLATFORM" or "CLOUDFORMATION". */

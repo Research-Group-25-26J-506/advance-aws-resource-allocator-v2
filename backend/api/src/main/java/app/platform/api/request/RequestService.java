@@ -79,28 +79,21 @@ public class RequestService {
                 formData,
                 idempotencyKey,
                 now);
-        requests.appendEvent(request.id(), null, RequestStatus.PENDING_VALIDATION, "Submitted", "PLATFORM", now);
+        RequestStatus next =
+                environment.requiresApproval() ? RequestStatus.PENDING_APPROVAL : RequestStatus.QUEUED;
+        request.transitionTo(next);
 
-        if (environment.requiresApproval()) {
-            request.transitionTo(RequestStatus.PENDING_APPROVAL);
-            requests.appendEvent(
-                    request.id(),
-                    RequestStatus.PENDING_VALIDATION,
-                    RequestStatus.PENDING_APPROVAL,
-                    "PROD requires approval",
-                    "PLATFORM",
-                    now);
-        } else {
-            request.transitionTo(RequestStatus.QUEUED);
-            requests.appendEvent(
-                    request.id(),
-                    RequestStatus.PENDING_VALIDATION,
-                    RequestStatus.QUEUED,
-                    "Validation passed",
-                    "PLATFORM",
-                    now);
-        }
+        // Save the request row BEFORE its events — request_events has an FK on requests, and
+        // Hibernate flushes inserts in persist order.
         requests.save(request);
+        requests.appendEvent(request.id(), null, RequestStatus.PENDING_VALIDATION, "Submitted", "PLATFORM", now);
+        requests.appendEvent(
+                request.id(),
+                RequestStatus.PENDING_VALIDATION,
+                next,
+                next == RequestStatus.PENDING_APPROVAL ? "PROD requires approval" : "Validation passed",
+                "PLATFORM",
+                now);
 
         if (request.status() == RequestStatus.QUEUED) {
             workQueue.enqueueProvision(request.id(), idempotencyKey);

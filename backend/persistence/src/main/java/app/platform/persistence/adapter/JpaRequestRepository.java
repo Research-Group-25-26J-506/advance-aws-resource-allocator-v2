@@ -49,6 +49,12 @@ public class JpaRequestRepository implements RequestRepository {
 
     @Override
     @Transactional(readOnly = true)
+    public Optional<Request> findByStackId(String stackId) {
+        return requests.findByStackId(stackId).map(this::toDomain);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<Request> findByRequester(String requesterId, int limit) {
         return requests.findByRequesterIdOrderBySubmittedAtDesc(requesterId, PageRequest.of(0, limit)).stream()
                 .map(this::toDomain)

@@ -4,7 +4,7 @@ name: build-images
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]   # develop is the trunk in this repo
   workflow_dispatch: {}
 
 concurrency:

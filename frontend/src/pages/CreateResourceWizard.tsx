@@ -159,6 +159,9 @@ export default function CreateResourceWizard() {
     } catch (e) {
       setError(String(e));
       setSubmitting(false);
+      // A failed attempt consumed this key server-side; the edited retry is a NEW logical
+      // request and needs a fresh key (same-key/different-payload is a 422 by design).
+      idempotencyKey.current = uuidv7();
     }
   };
 

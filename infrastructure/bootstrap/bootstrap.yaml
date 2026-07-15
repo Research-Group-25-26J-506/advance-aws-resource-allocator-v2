@@ -16,6 +16,10 @@ Parameters:
     Type: String
     Default: platform
     Description: Repository name for OIDC trust conditions
+  DeployBranch:
+    Type: String
+    Default: develop
+    Description: Branch whose pushes may assume the deploy role (non-prod)
 
 Conditions:
   IsProd: !Equals [!Ref EnvironmentName, prod]
@@ -210,7 +214,7 @@ Resources:
                   - IsProd
                   # prod deploys only from jobs inside the protected environment
                   - !Sub repo:${GitHubOrg}/${GitHubRepo}:environment:platform-prod
-                  - !Sub repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/main
+                  - !Sub repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/${DeployBranch}
       Policies:
         - PolicyName: deploy
           PolicyDocument:
