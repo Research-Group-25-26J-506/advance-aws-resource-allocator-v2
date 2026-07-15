@@ -22,7 +22,7 @@ subprojects {
     the<io.spring.gradle.dependencymanagement.dsl.DependencyManagementExtension>().apply {
         imports {
             mavenBom(org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES)
-            mavenBom("software.amazon.awssdk:bom:2.28.11")
+            mavenBom("software.amazon.awssdk:bom:2.48.0")
         }
     }
 
