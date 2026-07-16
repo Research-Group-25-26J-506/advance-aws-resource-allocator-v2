@@ -70,6 +70,23 @@ export interface TemplateSync {
   completedAt?: string | null;
 }
 
+export interface AuditEntry {
+  actorId: string;
+  action: string;
+  subjectType: string;
+  subjectId: string;
+  detail: string;
+  traceId: string;
+  occurredAt: string;
+}
+
+export interface Runbook {
+  id: string;
+  path: string;
+  title: string;
+  severity: string;
+}
+
 export interface PendingApproval {
   id: string;
   templateId: string;

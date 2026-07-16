@@ -23,6 +23,8 @@ const RequestDetailPage = lazy(() => import("./pages/RequestDetailPage"));
 const AuthCallbackPage = lazy(() => import("./pages/AuthCallbackPage"));
 const SyncAdminPage = lazy(() => import("./pages/SyncAdminPage"));
 const ApprovalsPage = lazy(() => import("./pages/ApprovalsPage"));
+const AuditLogPage = lazy(() => import("./pages/AuditLogPage"));
+const RunbooksPage = lazy(() => import("./pages/RunbooksPage"));
 const TemplatesAdminPage = lazy(() => import("./pages/TemplatesAdminPage"));
 
 export default function App() {
@@ -170,8 +172,15 @@ export default function App() {
                 }
               />
               <Route path="/deployments" element={<ComingSoon title="ECS deployments (2.06 — phase 3)" />} />
-              <Route path="/runbooks" element={<ComingSoon title="Runbook viewer (2.13 — phase 5)" />} />
-              <Route path="/audit" element={<ComingSoon title="Audit log (2.11 — phase 2)" />} />
+              <Route path="/runbooks" element={<RunbooksPage />} />
+              <Route
+                path="/audit"
+                element={
+                  <RequireRole roles={["PLATFORM_ADMIN", "APPROVER"]}>
+                    <AuditLogPage />
+                  </RequireRole>
+                }
+              />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>

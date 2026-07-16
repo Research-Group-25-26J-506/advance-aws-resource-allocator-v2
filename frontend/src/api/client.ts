@@ -1,10 +1,12 @@
 import { uuidv7 } from "uuidv7";
 import type {
+  AuditEntry,
   CreateRequestPayload,
   EnvironmentHealth,
   Kpi,
   Me,
   PendingApproval,
+  Runbook,
   PlatformRequest,
   RequestEvent,
   SyncEvent,
@@ -73,6 +75,8 @@ export const api = {
   listTemplates: () => call<Template[]>("GET", "/templates?maturity=stable,beta"),
   getTemplate: (id: string) => call<TemplateDetail>("GET", `/templates/${id}`),
 
+  listAudit: () => call<AuditEntry[]>("GET", "/audit"),
+  listRunbooks: () => call<Runbook[]>("GET", "/runbooks"),
   listApprovals: () => call<PendingApproval[]>("GET", "/approvals"),
   approveRequest: (id: string) => call<PlatformRequest>("POST", `/approvals/${id}/approve`, undefined, uuidv7()),
   rejectRequest: (id: string, reason: string) =>

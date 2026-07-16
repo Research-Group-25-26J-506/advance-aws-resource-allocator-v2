@@ -229,20 +229,32 @@ export default function RequestDetailPage() {
               id: "logs",
               label: "Logs",
               content: (
-                <Box color="text-status-inactive" padding="l">
-                  Embedded Grafana Loki panel filtered to request_id={request.id} lands with the observability
-                  stack (4.07/2.14b).
-                </Box>
+                <SpaceBetween size="s">
+                  <Button href="/grafana/explore" target="_blank" iconAlign="right" iconName="external">
+                    Open Grafana Explore (filter request_id: {request.id.slice(0, 8)}…)
+                  </Button>
+                  <iframe
+                    title="Grafana logs"
+                    src="/grafana/explore"
+                    style={{ width: "100%", height: 480, border: "1px solid #333", borderRadius: 8 }}
+                  />
+                </SpaceBetween>
               ),
             },
             {
               id: "trace",
               label: "Trace",
               content: (
-                <Box color="text-status-inactive" padding="l">
-                  Embedded Tempo trace (UI → API → SQS → Worker → CFN) lands with the observability stack
-                  (4.07/2.14b).
-                </Box>
+                <SpaceBetween size="s">
+                  <Button href="/grafana/explore" target="_blank" iconAlign="right" iconName="external">
+                    Open Tempo trace search
+                  </Button>
+                  <iframe
+                    title="Grafana traces"
+                    src="/grafana/explore"
+                    style={{ width: "100%", height: 480, border: "1px solid #333", borderRadius: 8 }}
+                  />
+                </SpaceBetween>
               ),
             },
           ]}
