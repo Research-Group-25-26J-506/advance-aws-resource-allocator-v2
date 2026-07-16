@@ -1,11 +1,16 @@
 import { uuidv7 } from "uuidv7";
 import type {
+  AuditEntry,
   CreateRequestPayload,
   EnvironmentHealth,
   Kpi,
   Me,
+  PendingApproval,
+  Runbook,
   PlatformRequest,
   RequestEvent,
+  SyncEvent,
+  SyncRun,
   Template,
   TemplateDetail,
 } from "./types";
@@ -69,6 +74,18 @@ export const api = {
 
   listTemplates: () => call<Template[]>("GET", "/templates?maturity=stable,beta"),
   getTemplate: (id: string) => call<TemplateDetail>("GET", `/templates/${id}`),
+
+  listAudit: () => call<AuditEntry[]>("GET", "/audit"),
+  listRunbooks: () => call<Runbook[]>("GET", "/runbooks"),
+  listApprovals: () => call<PendingApproval[]>("GET", "/approvals"),
+  approveRequest: (id: string) => call<PlatformRequest>("POST", `/approvals/${id}/approve`, undefined, uuidv7()),
+  rejectRequest: (id: string, reason: string) =>
+    call<PlatformRequest>("POST", `/approvals/${id}/reject`, { reason }, uuidv7()),
+
+  triggerSync: (mode: "DRY_RUN" | "APPLY", branch = "develop") =>
+    call<{ id: string; status: string }>("POST", "/admin/templates/sync", { mode, branch }, uuidv7()),
+  listSyncs: () => call<SyncRun[]>("GET", "/admin/templates/sync"),
+  getSync: (id: string) => call<SyncRun & { events: SyncEvent[] }>("GET", `/admin/templates/sync/${id}`),
 
   listMyRequests: (limit = 20) => call<PlatformRequest[]>("GET", `/requests?requester=me&limit=${limit}`),
   getRequest: (id: string) => call<PlatformRequest>("GET", `/requests/${id}`),

@@ -524,6 +524,12 @@ Resources:
       Name: !Sub /platform/${EnvironmentName}/ecs-cluster
       Type: String
       Value: !Ref Cluster
+  SsmHttpListener:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/http-listener-arn
+      Type: String
+      Value: !If [HasCert, !Ref HttpsListener, !Ref HttpListener]
 
 Outputs:
   AlbDnsName: { Value: !GetAtt Alb.DNSName }

@@ -70,6 +70,52 @@ export interface TemplateSync {
   completedAt?: string | null;
 }
 
+export interface AuditEntry {
+  actorId: string;
+  action: string;
+  subjectType: string;
+  subjectId: string;
+  detail: string;
+  traceId: string;
+  occurredAt: string;
+}
+
+export interface Runbook {
+  id: string;
+  path: string;
+  title: string;
+  severity: string;
+}
+
+export interface PendingApproval {
+  id: string;
+  templateId: string;
+  environment: Environment;
+  region: string;
+  resourceName: string;
+  requesterEmail: string;
+  submittedAt: string;
+}
+
+export interface SyncRun {
+  id: string;
+  actorId: string;
+  branch: string;
+  mode: "APPLY" | "DRY_RUN";
+  status: string;
+  startedAt: string;
+  completedAt?: string | null;
+  summary_json?: string | null;
+  error_json?: string | null;
+}
+
+export interface SyncEvent {
+  from_status: string | null;
+  to_status: string;
+  detail: string | null;
+  occurred_at: string;
+}
+
 export interface CreateRequestPayload {
   templateId: string;
   environment: Environment;

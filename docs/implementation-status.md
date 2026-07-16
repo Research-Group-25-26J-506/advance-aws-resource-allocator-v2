@@ -14,8 +14,8 @@ Last updated: 2026-07-15. Legend: ✅ done (scoped per 9.2 "smallest working ver
 | 2.04 | Dynamic wizard | ✅ | Schema-driven fields, Ajv + error mapping, sessionStorage drafts keyed by id@version, UUIDv7 idempotency, sensitive-field masking; `AttributeEditor` for array-of-object fields pending |
 | 2.05 | Request detail | ✅ | SSE with polling fallback, deep-linkable tabs, type-name-to-delete modal; Logs/Trace tabs are placeholders until 4.x |
 | 2.06 | ECS deployment wizard | ⬜ | Phase 3 |
-| 2.07 | Approvals inbox | ⬜ | Phase 4; route + role gate exist |
-| 2.08–2.10 | Templates admin, sync preview, sync history | ⬜ | Phase 2; needs 3.09–3.12 backend |
+| 2.07 | Approvals inbox | ✅ | Inbox UI + approve/reject endpoints; approve requeues provision |
+| 2.08–2.10 | Templates admin, sync preview, sync history | ✅ | Scoped: inventory page + sync page (dry-run/apply, history, event timeline) |
 | 2.11 | Audit log screen | ⬜ | audit_log table + writes exist; screen pending |
 | 2.12 | Observability portal | ⬜ | Needs 4.x |
 | 2.13 | Runbook viewer | ⬜ | runbooks table seeded; screen pending |
@@ -34,8 +34,8 @@ Last updated: 2026-07-15. Legend: ✅ done (scoped per 9.2 "smallest working ver
 | 3.06 | Per-template exec IAM | 🟡 | s3-bucket exec role done as the pattern; one role per remaining template to add |
 | 3.07 | GitHub App integration | ⬜ | Phase 3 |
 | 3.08 | Template renderer | ✅ | parameterMap + sandboxed Jinja modes, defaults merge, unmapped-field hard error, 51,200-byte limit constant; golden-file tests via unit tests |
-| 3.09–3.12 | Template sync pipeline | ⬜ | Phase 2; manifest schema + parser (5.02) already in `:templatesync` |
-| 3.10 | Distributed lock | 🟡 | DDB `platform-locks` + SQL fallback table provisioned; lock client code pending |
+| 3.09–3.12 | Template sync pipeline | ✅ | Scoped: lock + tarball fetcher (guards) + 5-stage validator + atomic publish; cfn-lint/nag + changeset dry-run stay in CI |
+| 3.10 | Distributed lock | ✅ | DynamoDB conditional-write lock with heartbeat + AutoCloseable |
 | 3.13 | Idempotency filter | ✅ | actor+endpoint-scoped keys, replay header, 422 on payload mismatch, stale-reservation recovery |
 | 3.14 | Runbook registry | 🟡 | Table + seed exist; API endpoints pending |
 

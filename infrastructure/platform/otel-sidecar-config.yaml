@@ -1,6 +1,5 @@
-# Minimal ADOT sidecar config, stored at SSM /platform/otel/sidecar/config (6.04).
-# Placeholder pipeline until the 4.x observability stack lands: accept OTLP, batch, drop to
-# debug logging — services can emit telemetry from day one without a backend.
+# ADOT sidecar config, stored at SSM /platform/otel/sidecar/config (6.04, 4.01 scoped).
+# Traces -> Tempo via Cloud Map DNS; metrics stay on debug until AMP (4.08) lands.
 receivers:
   otlp:
     protocols:
@@ -11,6 +10,10 @@ receivers:
 processors:
   batch: {}
 exporters:
+  otlp/tempo:
+    endpoint: tempo.platform.local:4317
+    tls:
+      insecure: true
   debug:
     verbosity: basic
 service:
@@ -18,7 +21,7 @@ service:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [debug]
+      exporters: [otlp/tempo]
     metrics:
       receivers: [otlp]
       processors: [batch]

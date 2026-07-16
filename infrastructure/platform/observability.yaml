@@ -1,0 +1,337 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Observability stack (4.07-4.09, dev-lite): Loki + Tempo (single-binary, S3 backends) and
+  Grafana on Fargate. Service discovery via Cloud Map (loki.platform.local etc.); Grafana served
+  through the ALB at /grafana. Config files are written by a shell command override - no custom
+  images to maintain. AMP (4.08) deferred; Grafana ships with Tempo, Loki and CloudWatch
+  datasources provisioned.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [dev, stg, prod]
+  AppSubnetsParam:
+    Type: AWS::SSM::Parameter::Value<List<String>>
+    Default: /platform/dev/network/app-subnets
+
+Resources:
+  Namespace:
+    Type: AWS::ServiceDiscovery::PrivateDnsNamespace
+    Properties:
+      Name: platform.local
+      Vpc: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/vpc-id}}"
+
+  LokiDiscovery:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: loki
+      NamespaceId: !Ref Namespace
+      DnsConfig:
+        DnsRecords: [{ Type: A, TTL: 10 }]
+      HealthCheckCustomConfig: { FailureThreshold: 1 }
+
+  TempoDiscovery:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: tempo
+      NamespaceId: !Ref Namespace
+      DnsConfig:
+        DnsRecords: [{ Type: A, TTL: 10 }]
+      HealthCheckCustomConfig: { FailureThreshold: 1 }
+
+  ObsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /platform/${EnvironmentName}/observability
+      RetentionInDays: 14
+
+  ObsTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-${EnvironmentName}-obs-task-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: obs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: LokiTempoBuckets
+                Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject, s3:ListBucket]
+                Resource:
+                  - !Sub arn:aws:s3:::platform-observability-loki-${AWS::AccountId}-${EnvironmentName}
+                  - !Sub arn:aws:s3:::platform-observability-loki-${AWS::AccountId}-${EnvironmentName}/*
+                  - !Sub arn:aws:s3:::platform-observability-tempo-${AWS::AccountId}-${EnvironmentName}
+                  - !Sub arn:aws:s3:::platform-observability-tempo-${AWS::AccountId}-${EnvironmentName}/*
+              - Sid: GrafanaCloudWatchDatasource
+                Effect: Allow
+                Action:
+                  - logs:StartQuery
+                  - logs:StopQuery
+                  - logs:GetQueryResults
+                  - logs:GetLogEvents
+                  - logs:DescribeLogGroups
+                  - logs:FilterLogEvents
+                  - cloudwatch:GetMetricData
+                  - cloudwatch:ListMetrics
+                  - cloudwatch:DescribeAlarms
+                Resource: "*"
+
+  # ---------------------------------------------------------------------- Loki
+  LokiTaskDef:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub platform-${EnvironmentName}-loki
+      RequiresCompatibilities: [FARGATE]
+      Cpu: "256"
+      Memory: "512"
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/platform-${EnvironmentName}-task-exec-role
+      TaskRoleArn: !GetAtt ObsTaskRole.Arn
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+      ContainerDefinitions:
+        - Name: loki
+          Image: grafana/loki:3.1.1
+          Essential: true
+          PortMappings: [{ ContainerPort: 3100 }]
+          EntryPoint: [sh, -c]
+          Command:
+            - !Sub |
+              cat > /tmp/loki.yaml <<'EOF'
+              auth_enabled: false
+              server:
+                http_listen_port: 3100
+              common:
+                ring:
+                  kvstore: { store: inmemory }
+                  instance_addr: 127.0.0.1
+                replication_factor: 1
+                path_prefix: /tmp/loki
+              schema_config:
+                configs:
+                  - from: "2024-01-01"
+                    store: tsdb
+                    object_store: s3
+                    schema: v13
+                    index: { prefix: index_, period: 24h }
+              storage_config:
+                aws:
+                  s3: s3://${AWS::Region}/platform-observability-loki-${AWS::AccountId}-${EnvironmentName}
+              compactor:
+                working_directory: /tmp/loki/compactor
+              limits_config:
+                retention_period: 720h
+              EOF
+              exec /usr/bin/loki -config.file=/tmp/loki.yaml
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ObsLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: loki
+
+  LokiService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: loki
+      Cluster: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/ecs-cluster}}"
+      TaskDefinition: !Ref LokiTaskDef
+      LaunchType: FARGATE
+      DesiredCount: 1
+      ServiceRegistries: [{ RegistryArn: !GetAtt LokiDiscovery.Arn }]
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref AppSubnetsParam
+          SecurityGroups:
+            - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-loki}}"
+            - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-ecs}}"
+
+  # ---------------------------------------------------------------------- Tempo
+  TempoTaskDef:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub platform-${EnvironmentName}-tempo
+      RequiresCompatibilities: [FARGATE]
+      Cpu: "256"
+      Memory: "512"
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/platform-${EnvironmentName}-task-exec-role
+      TaskRoleArn: !GetAtt ObsTaskRole.Arn
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+      ContainerDefinitions:
+        - Name: tempo
+          Image: grafana/tempo:2.6.1
+          Essential: true
+          PortMappings: [{ ContainerPort: 3200 }, { ContainerPort: 4317 }]
+          EntryPoint: [sh, -c]
+          Command:
+            - !Sub |
+              cat > /tmp/tempo.yaml <<'EOF'
+              server:
+                http_listen_port: 3200
+              distributor:
+                receivers:
+                  otlp:
+                    protocols:
+                      grpc:
+                        endpoint: 0.0.0.0:4317
+              storage:
+                trace:
+                  backend: s3
+                  s3:
+                    bucket: platform-observability-tempo-${AWS::AccountId}-${EnvironmentName}
+                    region: ${AWS::Region}
+                  wal: { path: /tmp/tempo/wal }
+              compactor:
+                compaction: { block_retention: 720h }
+              EOF
+              exec /tempo -config.file=/tmp/tempo.yaml
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ObsLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: tempo
+
+  TempoService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: tempo
+      Cluster: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/ecs-cluster}}"
+      TaskDefinition: !Ref TempoTaskDef
+      LaunchType: FARGATE
+      DesiredCount: 1
+      ServiceRegistries: [{ RegistryArn: !GetAtt TempoDiscovery.Arn }]
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref AppSubnetsParam
+          SecurityGroups:
+            - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-tempo}}"
+            - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-ecs}}"
+
+  # -------------------------------------------------------------------- Grafana
+  GrafanaSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/grafana/admin
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "admin"}'
+        GenerateStringKey: password
+        PasswordLength: 20
+        ExcludeCharacters: "\"@/\\'"
+
+  GrafanaTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub platform-${EnvironmentName}-grafana
+      VpcId: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/vpc-id}}"
+      Port: 3000
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckPath: /grafana/api/health
+      HealthCheckIntervalSeconds: 30
+      TargetGroupAttributes:
+        - { Key: deregistration_delay.timeout_seconds, Value: "15" }
+
+  GrafanaTaskDef:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub platform-${EnvironmentName}-grafana
+      RequiresCompatibilities: [FARGATE]
+      Cpu: "256"
+      Memory: "512"
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/platform-${EnvironmentName}-task-exec-role
+      TaskRoleArn: !GetAtt ObsTaskRole.Arn
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+      ContainerDefinitions:
+        - Name: grafana
+          Image: grafana/grafana-oss:11.3.1
+          Essential: true
+          PortMappings: [{ ContainerPort: 3000 }]
+          Environment:
+            - { Name: GF_SERVER_ROOT_URL, Value: "%(protocol)s://%(domain)s/grafana/" }
+            - { Name: GF_SERVER_SERVE_FROM_SUB_PATH, Value: "true" }
+            - { Name: GF_AUTH_ANONYMOUS_ENABLED, Value: "false" }
+            - { Name: GF_SECURITY_ALLOW_EMBEDDING, Value: "true" }
+            - { Name: GF_USERS_ALLOW_SIGN_UP, Value: "false" }
+          Secrets:
+            - Name: GF_SECURITY_ADMIN_PASSWORD
+              ValueFrom: !Sub "${GrafanaSecret}:password::"
+          EntryPoint: [sh, -c]
+          Command:
+            - !Sub |
+              mkdir -p /etc/grafana/provisioning/datasources
+              cat > /etc/grafana/provisioning/datasources/platform.yaml <<'EOF'
+              apiVersion: 1
+              datasources:
+                - name: Tempo
+                  type: tempo
+                  access: proxy
+                  url: http://tempo.platform.local:3200
+                  uid: tempo
+                - name: Loki
+                  type: loki
+                  access: proxy
+                  url: http://loki.platform.local:3100
+                  uid: loki
+                - name: CloudWatch
+                  type: cloudwatch
+                  access: proxy
+                  uid: cloudwatch
+                  jsonData:
+                    authType: default
+                    defaultRegion: ${AWS::Region}
+              EOF
+              exec /run.sh
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ObsLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: grafana
+
+  GrafanaService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: grafana
+      Cluster: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/ecs-cluster}}"
+      TaskDefinition: !Ref GrafanaTaskDef
+      LaunchType: FARGATE
+      DesiredCount: 1
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker: { Enable: true, Rollback: true }
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref AppSubnetsParam
+          SecurityGroups:
+            - !Sub "{{resolve:ssm:/platform/${EnvironmentName}/network/sg-ecs}}"
+      LoadBalancers:
+        - { ContainerName: grafana, ContainerPort: 3000, TargetGroupArn: !Ref GrafanaTargetGroup }
+      HealthCheckGracePeriodSeconds: 60
+
+  GrafanaListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/http-listener-arn}}"
+      Priority: 5
+      Conditions: [{ Field: path-pattern, PathPatternConfig: { Values: ["/grafana", "/grafana/*"] } }]
+      Actions: [{ Type: forward, TargetGroupArn: !Ref GrafanaTargetGroup }]
+
+  SsmGrafanaUrl:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/observability/grafana-url
+      Type: String
+      Value: /grafana
+
+Outputs:
+  GrafanaTargetGroupArn: { Value: !Ref GrafanaTargetGroup }
