@@ -70,6 +70,16 @@ export interface TemplateSync {
   completedAt?: string | null;
 }
 
+export interface PendingApproval {
+  id: string;
+  templateId: string;
+  environment: Environment;
+  region: string;
+  resourceName: string;
+  requesterEmail: string;
+  submittedAt: string;
+}
+
 export interface SyncRun {
   id: string;
   actorId: string;

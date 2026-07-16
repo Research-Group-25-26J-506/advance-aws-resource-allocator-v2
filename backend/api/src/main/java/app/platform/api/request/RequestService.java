@@ -122,6 +122,30 @@ public class RequestService {
     }
 
     @Transactional
+    public Request approve(String actorId, UUID id) {
+        Request request = get(id);
+        request.transitionTo(RequestStatus.QUEUED); // legal only from PENDING_APPROVAL
+        requests.save(request);
+        requests.appendEvent(id, RequestStatus.PENDING_APPROVAL, RequestStatus.QUEUED,
+                "Approved by " + actorId, "PLATFORM", Instant.now());
+        workQueue.enqueueProvision(id, request.idempotencyKey());
+        audit.record(actorId, actorId, "APPROVAL_GRANTED", "REQUEST", id.toString(), Map.of());
+        return request;
+    }
+
+    @Transactional
+    public Request reject(String actorId, UUID id, String reason) {
+        Request request = get(id);
+        request.recordFailure(reason);
+        request.transitionTo(RequestStatus.REJECTED);
+        requests.save(request);
+        requests.appendEvent(id, RequestStatus.PENDING_APPROVAL, RequestStatus.REJECTED,
+                "Rejected by " + actorId + ": " + reason, "PLATFORM", Instant.now());
+        audit.record(actorId, actorId, "APPROVAL_REJECTED", "REQUEST", id.toString(), Map.of("reason", reason));
+        return request;
+    }
+
+    @Transactional
     public Request retry(String actorId, UUID id) {
         Request request = get(id);
         RequestStatus from = request.status();

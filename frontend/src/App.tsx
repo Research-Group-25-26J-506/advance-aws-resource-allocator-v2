@@ -22,6 +22,7 @@ const RequestsListPage = lazy(() => import("./pages/RequestsListPage"));
 const RequestDetailPage = lazy(() => import("./pages/RequestDetailPage"));
 const AuthCallbackPage = lazy(() => import("./pages/AuthCallbackPage"));
 const SyncAdminPage = lazy(() => import("./pages/SyncAdminPage"));
+const ApprovalsPage = lazy(() => import("./pages/ApprovalsPage"));
 const TemplatesAdminPage = lazy(() => import("./pages/TemplatesAdminPage"));
 
 export default function App() {
@@ -148,7 +149,7 @@ export default function App() {
                 path="/approvals"
                 element={
                   <RequireRole roles={["APPROVER", "PLATFORM_ADMIN"]}>
-                    <ComingSoon title="Approvals inbox (2.07 — phase 4)" />
+                    <ApprovalsPage />
                   </RequireRole>
                 }
               />

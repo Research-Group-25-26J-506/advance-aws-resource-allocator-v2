@@ -4,6 +4,7 @@ import type {
   EnvironmentHealth,
   Kpi,
   Me,
+  PendingApproval,
   PlatformRequest,
   RequestEvent,
   SyncEvent,
@@ -71,6 +72,11 @@ export const api = {
 
   listTemplates: () => call<Template[]>("GET", "/templates?maturity=stable,beta"),
   getTemplate: (id: string) => call<TemplateDetail>("GET", `/templates/${id}`),
+
+  listApprovals: () => call<PendingApproval[]>("GET", "/approvals"),
+  approveRequest: (id: string) => call<PlatformRequest>("POST", `/approvals/${id}/approve`, undefined, uuidv7()),
+  rejectRequest: (id: string, reason: string) =>
+    call<PlatformRequest>("POST", `/approvals/${id}/reject`, { reason }, uuidv7()),
 
   triggerSync: (mode: "DRY_RUN" | "APPLY", branch = "develop") =>
     call<{ id: string; status: string }>("POST", "/admin/templates/sync", { mode, branch }, uuidv7()),
