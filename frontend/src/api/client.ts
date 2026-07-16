@@ -6,6 +6,8 @@ import type {
   Me,
   PlatformRequest,
   RequestEvent,
+  SyncEvent,
+  SyncRun,
   Template,
   TemplateDetail,
 } from "./types";
@@ -69,6 +71,11 @@ export const api = {
 
   listTemplates: () => call<Template[]>("GET", "/templates?maturity=stable,beta"),
   getTemplate: (id: string) => call<TemplateDetail>("GET", `/templates/${id}`),
+
+  triggerSync: (mode: "DRY_RUN" | "APPLY", branch = "develop") =>
+    call<{ id: string; status: string }>("POST", "/admin/templates/sync", { mode, branch }, uuidv7()),
+  listSyncs: () => call<SyncRun[]>("GET", "/admin/templates/sync"),
+  getSync: (id: string) => call<SyncRun & { events: SyncEvent[] }>("GET", `/admin/templates/sync/${id}`),
 
   listMyRequests: (limit = 20) => call<PlatformRequest[]>("GET", `/requests?requester=me&limit=${limit}`),
   getRequest: (id: string) => call<PlatformRequest>("GET", `/requests/${id}`),

@@ -21,6 +21,8 @@ const CreateResourceWizard = lazy(() => import("./pages/CreateResourceWizard"));
 const RequestsListPage = lazy(() => import("./pages/RequestsListPage"));
 const RequestDetailPage = lazy(() => import("./pages/RequestDetailPage"));
 const AuthCallbackPage = lazy(() => import("./pages/AuthCallbackPage"));
+const SyncAdminPage = lazy(() => import("./pages/SyncAdminPage"));
+const TemplatesAdminPage = lazy(() => import("./pages/TemplatesAdminPage"));
 
 export default function App() {
   const [me, setMe] = useState<Me | null>(null);
@@ -151,10 +153,18 @@ export default function App() {
                 }
               />
               <Route
-                path="/admin/*"
+                path="/admin/templates"
                 element={
                   <RequireRole roles={["TEMPLATE_ADMIN", "PLATFORM_ADMIN"]}>
-                    <ComingSoon title="Template admin + sync (2.08–2.10 — phase 2)" />
+                    <TemplatesAdminPage />
+                  </RequireRole>
+                }
+              />
+              <Route
+                path="/admin/sync"
+                element={
+                  <RequireRole roles={["TEMPLATE_ADMIN", "PLATFORM_ADMIN"]}>
+                    <SyncAdminPage />
                   </RequireRole>
                 }
               />
