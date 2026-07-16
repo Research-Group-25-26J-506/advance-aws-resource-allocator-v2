@@ -8,4 +8,6 @@ public interface WorkQueue {
     void enqueueProvision(UUID requestId, String idempotencyKey);
 
     void enqueueDelete(UUID requestId, String idempotencyKey);
+
+    void enqueueTemplateSync(UUID syncId, String idempotencyKey);
 }

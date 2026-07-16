@@ -342,6 +342,8 @@ Resources:
             - { Name: PLATFORM_DB_HOST, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/db/proxy-endpoint}}" }
             - { Name: PLATFORM_REQUESTS_QUEUE_URL, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/sqs/requests-queue-url}}" }
             - { Name: PLATFORM_TEMPLATES_BUCKET, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/templates-bucket}}" }
+            - { Name: PLATFORM_TEMPLATES_REPO, Value: Research-Group-25-26J-506/advance-aws-resource-allocator-v2 }
+            - { Name: PLATFORM_TEMPLATES_BRANCH, Value: develop }
           Secrets:
             - Name: PLATFORM_DB_USER
               ValueFrom: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/db/secret-arn}}:username::"

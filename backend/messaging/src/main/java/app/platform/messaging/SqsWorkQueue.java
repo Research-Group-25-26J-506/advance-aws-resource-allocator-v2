@@ -36,6 +36,11 @@ public class SqsWorkQueue implements WorkQueue {
         send(new WorkMessage(WorkMessage.MessageType.DELETE, requestId, idempotencyKey));
     }
 
+    @Override
+    public void enqueueTemplateSync(UUID syncId, String idempotencyKey) {
+        send(new WorkMessage(WorkMessage.MessageType.TEMPLATE_SYNC, syncId, idempotencyKey));
+    }
+
     private void send(WorkMessage message) {
         // W3C traceparent rides as a message attribute so worker spans continue the API trace (4.05)
         Map<String, MessageAttributeValue> attributes = new HashMap<>();
