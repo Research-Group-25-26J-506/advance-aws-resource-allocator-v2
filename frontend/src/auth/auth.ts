@@ -17,9 +17,18 @@ interface RuntimeConfig {
 let config: RuntimeConfig = { authMode: "dev-bypass", issuer: "", clientId: "", cognitoDomain: "" };
 let manager: UserManager | null = null;
 let currentUser: User | null = null;
+let initPromise: Promise<AuthMode> | null = null;
+
+/** Idempotent: concurrent callers (app shell + callback page) share one initialisation. */
+export function initAuth(): Promise<AuthMode> {
+  if (!initPromise) {
+    initPromise = doInit();
+  }
+  return initPromise;
+}
 
 /** Resolves with the active mode; never resolves if a login redirect is in flight. */
-export async function initAuth(): Promise<AuthMode> {
+async function doInit(): Promise<AuthMode> {
   if (import.meta.env.VITE_USE_MOCKS === "true") {
     return "dev-bypass";
   }
@@ -61,8 +70,9 @@ export async function initAuth(): Promise<AuthMode> {
 
 /** Called by the /auth/callback route. Returns the path the user originally asked for. */
 export async function completeLogin(): Promise<string> {
+  await initAuth(); // wait for the manager — the callback page mounts before init finishes
   if (!manager) {
-    throw new Error("auth not initialised");
+    throw new Error("auth not initialised (dev-bypass mode has no callback)");
   }
   const user = await manager.signinRedirectCallback();
   currentUser = user;
