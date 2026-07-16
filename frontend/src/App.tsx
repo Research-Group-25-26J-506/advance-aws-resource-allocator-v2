@@ -31,6 +31,9 @@ export default function App() {
   const location = useLocation();
 
   useEffect(() => {
+    if (window.location.pathname === "/auth/callback") {
+      return; // no identity yet — the callback page finishes login and reloads
+    }
     // Auth gate first: in cognito mode this may redirect to the Hosted UI and never resolve.
     initAuth()
       .then(() => api.me())
