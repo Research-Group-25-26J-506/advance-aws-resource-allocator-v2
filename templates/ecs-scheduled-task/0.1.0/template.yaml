@@ -1,0 +1,122 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Platform-managed scheduled task (the Kubernetes CronJob equivalent on ECS): EventBridge
+  Scheduler runs a container image on the platform Fargate cluster on a cron or rate schedule.
+  Pulls the image fresh every run. Suits ETLs, syncs, and report jobs - no always-on cost.
+
+Parameters:
+  Environment:
+    Type: String
+    Description: Injected by the platform (dev/qa/stg/prod) - suffixes physical names
+    Default: dev
+  TaskName:
+    Type: String
+    AllowedPattern: "^[a-z][a-z0-9-]{1,40}$"
+  Image:
+    Type: String
+    Description: Full image URI, e.g. 1234.dkr.ecr.us-east-1.amazonaws.com/list-sync:v1
+  Schedule:
+    Type: String
+    Description: EventBridge Scheduler expression, e.g. cron(0 2 * * ? *) or rate(6 hours)
+  Cpu:
+    Type: String
+    AllowedValues: ["256", "512", "1024"]
+    Default: "256"
+  Memory:
+    Type: String
+    AllowedValues: ["512", "1024", "2048"]
+    Default: "512"
+  # Platform wiring
+  AppSubnetsParam:
+    Type: AWS::SSM::Parameter::Value<List<String>>
+    Default: /platform/dev/network/app-subnets
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /platform/apps/${TaskName}-${Environment}
+      RetentionInDays: 30
+
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-app-${TaskName}-${Environment}-exec
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  TaskDef:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub platform-app-${TaskName}-${Environment}
+      RequiresCompatibilities: [FARGATE]
+      Cpu: !Ref Cpu
+      Memory: !Ref Memory
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+      ContainerDefinitions:
+        - Name: task
+          Image: !Ref Image
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: run
+
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-app-${TaskName}-${Environment}-scheduler
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: scheduler.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: run-task
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecs:RunTask
+                Resource: !Ref TaskDef
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt ExecutionRole.Arn
+
+  Schedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub platform-app-${TaskName}-${Environment}
+      ScheduleExpression: !Ref Schedule
+      FlexibleTimeWindow: { Mode: "OFF" }
+      Target:
+        Arn: !Sub arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/platform-cluster-dev
+        RoleArn: !GetAtt SchedulerRole.Arn
+        EcsParameters:
+          TaskDefinitionArn: !Ref TaskDef
+          LaunchType: FARGATE
+          NetworkConfiguration:
+            AwsvpcConfiguration:
+              AssignPublicIp: DISABLED
+              Subnets: !Ref AppSubnetsParam
+              SecurityGroups:
+                - "{{resolve:ssm:/platform/dev/network/sg-ecs}}"
+        RetryPolicy:
+          MaximumRetryAttempts: 1
+          MaximumEventAgeInSeconds: 3600
+
+Outputs:
+  TaskDefinitionArn: { Value: !Ref TaskDef }
+  ScheduleName: { Value: !Ref Schedule }
+  LogGroupName: { Value: !Ref LogGroup }

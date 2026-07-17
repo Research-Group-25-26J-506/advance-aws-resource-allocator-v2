@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Scheduled Task",
+  "type": "object",
+  "required": ["taskName", "image", "schedule"],
+  "additionalProperties": false,
+  "properties": {
+    "taskName": {
+      "type": "string",
+      "title": "Task name",
+      "pattern": "^[a-z][a-z0-9-]{1,40}$"
+    },
+    "image": {
+      "type": "string",
+      "title": "Container image URI",
+      "x-help": "Pulled fresh on every scheduled run."
+    },
+    "schedule": {
+      "type": "string",
+      "title": "Schedule expression",
+      "x-help": "cron(0 2 * * ? *) = daily 02:00 UTC, or rate(6 hours)."
+    },
+    "cpu": {
+      "type": "string",
+      "title": "CPU units",
+      "enum": ["256", "512", "1024"],
+      "default": "256"
+    },
+    "memory": {
+      "type": "string",
+      "title": "Memory (MB)",
+      "enum": ["512", "1024", "2048"],
+      "default": "512"
+    }
+  }
+}
