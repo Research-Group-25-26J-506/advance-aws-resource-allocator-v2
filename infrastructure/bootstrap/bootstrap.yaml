@@ -213,6 +213,11 @@ Resources:
                   # single-platform model: THIS repo is the trust boundary — any job in it may
                   # deploy to the dev platform account (fork PRs can't mint tokens for this sub)
                   - !Sub repo:${GitHubOrg}/${GitHubRepo}:*
+      # CloudFormation performs resource operations with the CALLER's credentials; a platform
+      # deploy touches a dozen services, so PowerUser (everything except IAM) + the scoped IAM
+      # statement below is the pragmatic single-account posture.
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/PowerUserAccess
       Policies:
         - PolicyName: deploy
           PolicyDocument:
@@ -224,7 +229,8 @@ Resources:
                 Resource:
                   - !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/platform-*
                   # templates using macros need CreateChangeSet on the transform itself
-                  - arn:aws:cloudformation:*:aws:transform/SecretsManager-2020-07-23
+                  # (SecretsManager, Serverless for hosted-rotation nested stacks, ...)
+                  - arn:aws:cloudformation:*:aws:transform/*
               - Sid: PassExecRoles
                 Effect: Allow
                 Action: iam:PassRole

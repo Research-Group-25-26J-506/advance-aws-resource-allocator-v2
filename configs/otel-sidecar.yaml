@@ -14,8 +14,9 @@ exporters:
     endpoint: tempo.platform.local:4317
     tls:
       insecure: true
-  debug:
-    verbosity: basic
+  # ADOT v0.40 has no `debug` exporter — its console exporter is `logging`
+  logging:
+    loglevel: warn
 service:
   pipelines:
     traces:
@@ -25,4 +26,4 @@ service:
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [debug]
+      exporters: [logging]

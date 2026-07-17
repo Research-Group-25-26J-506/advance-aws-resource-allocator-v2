@@ -13,6 +13,7 @@ import app.platform.domain.service.TagPolicyService;
 import app.platform.domain.service.TemplateRenderer;
 import app.platform.messaging.WorkMessage;
 import app.platform.persistence.repo.SpringDataRepos;
+import app.platform.worker.aws.ExecRoleResolver;
 import app.platform.worker.consume.WorkDispatcher.Outcome;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -41,6 +42,7 @@ public class ProvisionHandler {
     private final StackLauncher stackLauncher;
     private final AwsErrorClassifier errorClassifier;
     private final SpringDataRepos.Teams teams;
+    private final ExecRoleResolver execRoles;
     private final Counter created;
     private final Counter failed;
 
@@ -53,6 +55,7 @@ public class ProvisionHandler {
             StackLauncher stackLauncher,
             AwsErrorClassifier errorClassifier,
             SpringDataRepos.Teams teams,
+            ExecRoleResolver execRoles,
             MeterRegistry metrics) {
         this.requests = requests;
         this.templates = templates;
@@ -62,6 +65,7 @@ public class ProvisionHandler {
         this.stackLauncher = stackLauncher;
         this.errorClassifier = errorClassifier;
         this.teams = teams;
+        this.execRoles = execRoles;
         this.created = metrics.counter("stack_create_initiated");
         this.failed = metrics.counter("stack_create_failed");
     }
@@ -101,7 +105,7 @@ public class ProvisionHandler {
                     rendered.parameters(),
                     tags,
                     manifest.cfnCapabilities(),
-                    manifest.executionRoleArn(),
+                    execRoles.resolve(manifest.executionRoleArn(), request.templateId()),
                     request.environment(),
                     request.region(),
                     work.idempotencyKey()));

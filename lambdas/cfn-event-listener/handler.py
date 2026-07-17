@@ -56,13 +56,19 @@ def _db_credentials():
 def _connect():
     creds = _db_credentials()
     # Short-lived connections through RDS Proxy — avoids pinning, proxy does the pooling.
+    # Prefer the cluster endpoint from the secret (SecretTargetAttachment adds it): the
+    # client->proxy auth layer rejects MySQL8 auth plugins in some combinations, and this
+    # low-frequency listener doesn't need proxy pooling.
     return pymysql.connect(
-        host=os.environ["DB_HOST"],
+        host=creds.get("host") or os.environ["DB_HOST"],
         user=creds["username"],
         password=creds["password"],
         database=os.environ.get("DB_NAME", "platform"),
         connect_timeout=5,
         autocommit=False,
+        # RDS Proxy has RequireTLS; a non-empty ssl dict makes pymysql negotiate TLS with the
+        # default context (Amazon roots are in the Lambda runtime's trust store)
+        ssl={"enable_tls": True},
     )
 
 

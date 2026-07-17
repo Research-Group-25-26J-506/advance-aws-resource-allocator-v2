@@ -83,6 +83,18 @@ export function accessToken(): string | null {
   return currentUser && !currentUser.expired ? currentUser.access_token : null;
 }
 
+/**
+ * Global 401 handler: an expired/missing session in cognito mode re-runs the login redirect
+ * (usually silent — Cognito's own session cookie survives token expiry). Dev-bypass: no-op.
+ */
+export function handleUnauthorized(): void {
+  if (config.authMode === "cognito" && manager) {
+    manager.signinRedirect({ state: window.location.pathname + window.location.search }).catch(() => {
+      window.location.href = "/"; // last resort: full reload restarts the auth gate
+    });
+  }
+}
+
 export function signOut(): void {
   if (config.authMode !== "cognito") {
     return; // nothing to sign out of locally

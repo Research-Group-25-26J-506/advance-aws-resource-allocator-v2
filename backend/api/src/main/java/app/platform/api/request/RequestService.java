@@ -59,10 +59,12 @@ public class RequestService {
                 .findLatestPublished(templateId)
                 .orElseThrow(() -> new NotFoundException("Published template", templateId));
 
-        // TODO(phase-2): resolve the requester's team from the user directory (custom:team_id claim)
+        // TODO(later): resolve the requester's team from the user directory (custom:team_id claim).
+        // Until then: get-or-create a default team so a fresh environment can take requests.
         UUID teamId = teams.findAll().stream()
                 .findFirst()
-                .orElseThrow(() -> new IllegalStateException("no teams seeded"))
+                .orElseGet(() -> teams.save(new app.platform.persistence.entity.TeamEntity(
+                        UuidV7.generate(), "default", "UNSET")))
                 .getId();
 
         Instant now = Instant.now();
@@ -119,6 +121,39 @@ public class RequestService {
     public List<app.platform.domain.model.RequestEvent> listEvents(UUID id) {
         get(id); // 404 if unknown
         return requests.listEvents(id);
+    }
+
+    /**
+     * Resource promotion: re-provisions the same template + configuration at the next
+     * environment (DEV -> STG -> PROD). PROD promotions park in the approvals inbox like any
+     * other PROD request. The source resource is untouched.
+     */
+    @Transactional
+    public Request promote(String actorId, String actorEmail, UUID sourceId, String idempotencyKey) {
+        Request source = get(sourceId);
+        if (source.status() != RequestStatus.CREATE_COMPLETE && source.status() != RequestStatus.UPDATE_COMPLETE) {
+            throw new app.platform.domain.error.IllegalTransitionException(
+                    sourceId, source.status(), RequestStatus.QUEUED);
+        }
+        Environment next = switch (source.environment()) {
+            case DEV -> Environment.STG;
+            case STG -> Environment.PROD;
+            case PROD -> throw new app.platform.domain.error.NotFoundException(
+                    "Environment above", Environment.PROD);
+        };
+        Request promoted = submit(
+                actorId,
+                actorEmail,
+                source.templateId(),
+                next,
+                source.region(),
+                source.resourceName(),
+                source.formData(),
+                idempotencyKey);
+        audit.record(actorId, actorEmail, "RESOURCE_PROMOTED", "REQUEST", promoted.id().toString(),
+                Map.of("from", source.environment().name(), "to", next.name(),
+                        "sourceRequestId", sourceId.toString()));
+        return promoted;
     }
 
     @Transactional

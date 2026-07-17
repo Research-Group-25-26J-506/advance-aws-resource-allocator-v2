@@ -191,7 +191,8 @@ Resources:
                 Resource: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/sqs/requests-queue-arn}}"
               - Sid: Idempotency
                 Effect: Allow
-                Action: [dynamodb:PutItem, dynamodb:GetItem, dynamodb:UpdateItem]
+                # DeleteItem: the filter drops its reservation instead of caching 5xx responses
+                Action: [dynamodb:PutItem, dynamodb:GetItem, dynamodb:UpdateItem, dynamodb:DeleteItem]
                 Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/platform-idempotency-${EnvironmentName}
               - Sid: TemplatesRead
                 Effect: Allow

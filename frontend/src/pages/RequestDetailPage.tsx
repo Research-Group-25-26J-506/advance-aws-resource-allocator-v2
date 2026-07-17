@@ -9,6 +9,7 @@ import ColumnLayout from "@cloudscape-design/components/column-layout";
 import Container from "@cloudscape-design/components/container";
 import ContentLayout from "@cloudscape-design/components/content-layout";
 import ExpandableSection from "@cloudscape-design/components/expandable-section";
+import Flashbar, { FlashbarProps } from "@cloudscape-design/components/flashbar";
 import Header from "@cloudscape-design/components/header";
 import Input from "@cloudscape-design/components/input";
 import Modal from "@cloudscape-design/components/modal";
@@ -33,7 +34,37 @@ export default function RequestDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [deleteVisible, setDeleteVisible] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [actionBusy, setActionBusy] = useState(false);
+  const [flashes, setFlashes] = useState<FlashbarProps.MessageDefinition[]>([]);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const flash = (type: "success" | "error", content: string) => {
+    const id = String(Date.now());
+    setFlashes((current) => [
+      ...current,
+      {
+        id,
+        type,
+        content,
+        dismissible: true,
+        onDismiss: () => setFlashes((f) => f.filter((m) => m.id !== id)),
+      },
+    ]);
+    setTimeout(() => setFlashes((f) => f.filter((m) => m.id !== id)), 6000);
+  };
+
+  const runAction = async (label: string, action: () => Promise<unknown>) => {
+    setActionBusy(true);
+    try {
+      await action();
+      flash("success", label);
+      refresh();
+    } catch (e) {
+      flash("error", `${label.split(" ")[0]} failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setActionBusy(false);
+    }
+  };
 
   const refresh = useCallback(() => {
     if (!id) return;
@@ -85,7 +116,43 @@ export default function RequestDetailPage() {
     );
   }
 
+  // Deep-linked Grafana Explore views (2.14b): Tempo trace search scoped to the platform
+  // services; CloudWatch Logs Insights filtered to this request_id.
+  const traceUrl =
+    "/grafana/explore?left=" +
+    encodeURIComponent(
+      JSON.stringify({
+        datasource: "tempo",
+        queries: [{ refId: "A", queryType: "traceqlSearch", limit: 20, filters: [] }],
+        range: { from: "now-3h", to: "now" },
+      }),
+    );
+  const logsUrl =
+    "/grafana/explore?left=" +
+    encodeURIComponent(
+      JSON.stringify({
+        datasource: "cloudwatch",
+        queries: [
+          {
+            refId: "A",
+            queryMode: "Logs",
+            region: "default",
+            expression: `fields @timestamp, message, level | filter request_id = "${request.id}" or @message like "${request.id.slice(0, 8)}" | sort @timestamp desc | limit 100`,
+            logGroups: [
+              { arn: "arn:aws:logs:us-east-1:194418667229:log-group:/platform/dev/api:*", name: "/platform/dev/api" },
+              { arn: "arn:aws:logs:us-east-1:194418667229:log-group:/platform/dev/worker:*", name: "/platform/dev/worker" },
+            ],
+          },
+        ],
+        range: { from: "now-3h", to: "now" },
+      }),
+    );
+
   const failed = request.status.endsWith("_FAILED") || request.status === "FAILED_VALIDATION";
+  const promotable =
+    (request.status === "CREATE_COMPLETE" || request.status === "UPDATE_COMPLETE") &&
+    request.environment !== "PROD";
+  const nextEnv = request.environment === "DEV" ? "STG" : "PROD";
   const activeTab = searchParams.get("tab") ?? "overview";
 
   return (
@@ -95,14 +162,24 @@ export default function RequestDetailPage() {
           variant="h1"
           actions={
             <ButtonDropdown
+              loading={actionBusy}
               items={[
+                { id: "promote", text: `Promote to ${nextEnv}`, disabled: !promotable },
                 { id: "retry", text: "Retry", disabled: !failed },
                 { id: "delete", text: "Delete", disabled: isInProgress(request.status) },
                 { id: "console", text: "View in AWS Console", external: true, disabled: !request.stackId },
               ]}
-              onItemClick={async (e) => {
+              onItemClick={(e) => {
+                if (e.detail.id === "promote") {
+                  runAction(`Promotion to ${nextEnv} submitted — opening the new request`, async () => {
+                    const promoted = await api.promoteRequest(request.id);
+                    window.location.href = `/requests/${promoted.id}`;
+                  });
+                }
                 if (e.detail.id === "retry") {
-                  await api.retryRequest(request.id).then(setRequest).catch((err) => setError(String(err)));
+                  runAction("Retry queued — the request is back in the worker queue", () =>
+                    api.retryRequest(request.id).then(setRequest),
+                  );
                 }
                 if (e.detail.id === "delete") setDeleteVisible(true);
                 if (e.detail.id === "console" && request.stackId) {
@@ -123,6 +200,7 @@ export default function RequestDetailPage() {
       }
     >
       <SpaceBetween size="l">
+        <Flashbar items={flashes} />
         {error && (
           <Alert type="error" dismissible onDismiss={() => setError(null)}>
             {error}
@@ -132,7 +210,18 @@ export default function RequestDetailPage() {
           <Alert
             type="error"
             header="This request failed"
-            action={<Button onClick={() => api.retryRequest(request.id).then(setRequest)}>Retry</Button>}
+            action={
+              <Button
+                loading={actionBusy}
+                onClick={() =>
+                  runAction("Retry queued — the request is back in the worker queue", () =>
+                    api.retryRequest(request.id).then(setRequest),
+                  )
+                }
+              >
+                Retry
+              </Button>
+            }
           >
             {request.failureReason}
           </Alert>
@@ -230,12 +319,12 @@ export default function RequestDetailPage() {
               label: "Logs",
               content: (
                 <SpaceBetween size="s">
-                  <Button href="/grafana/explore" target="_blank" iconAlign="right" iconName="external">
-                    Open Grafana Explore (filter request_id: {request.id.slice(0, 8)}…)
+                  <Button href={logsUrl} target="_blank" iconAlign="right" iconName="external">
+                    Open logs for this request (CloudWatch Logs Insights)
                   </Button>
                   <iframe
                     title="Grafana logs"
-                    src="/grafana/explore"
+                    src={logsUrl}
                     style={{ width: "100%", height: 480, border: "1px solid #333", borderRadius: 8 }}
                   />
                 </SpaceBetween>
@@ -246,12 +335,12 @@ export default function RequestDetailPage() {
               label: "Trace",
               content: (
                 <SpaceBetween size="s">
-                  <Button href="/grafana/explore" target="_blank" iconAlign="right" iconName="external">
-                    Open Tempo trace search
+                  <Button href={traceUrl} target="_blank" iconAlign="right" iconName="external">
+                    Open Tempo trace search (last 3h)
                   </Button>
                   <iframe
                     title="Grafana traces"
-                    src="/grafana/explore"
+                    src={traceUrl}
                     style={{ width: "100%", height: 480, border: "1px solid #333", borderRadius: 8 }}
                   />
                 </SpaceBetween>
@@ -273,10 +362,13 @@ export default function RequestDetailPage() {
               </Button>
               <Button
                 variant="primary"
+                loading={actionBusy}
                 disabled={deleteConfirmText !== request.resourceName}
-                onClick={async () => {
+                onClick={() => {
                   setDeleteVisible(false);
-                  await api.deleteRequest(request.id).then(setRequest).catch((e) => setError(String(e)));
+                  runAction("Deletion started — the stack is being removed", () =>
+                    api.deleteRequest(request.id).then(setRequest),
+                  );
                 }}
               >
                 Delete

@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useState } from "react";
-import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import AppLayout from "@cloudscape-design/components/app-layout";
 import Box from "@cloudscape-design/components/box";
 import BreadcrumbGroup from "@cloudscape-design/components/breadcrumb-group";
@@ -25,6 +25,7 @@ const SyncAdminPage = lazy(() => import("./pages/SyncAdminPage"));
 const ApprovalsPage = lazy(() => import("./pages/ApprovalsPage"));
 const AuditLogPage = lazy(() => import("./pages/AuditLogPage"));
 const RunbooksPage = lazy(() => import("./pages/RunbooksPage"));
+const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
 const TemplatesAdminPage = lazy(() => import("./pages/TemplatesAdminPage"));
 
 export default function App() {
@@ -171,7 +172,8 @@ export default function App() {
                   </RequireRole>
                 }
               />
-              <Route path="/deployments" element={<ComingSoon title="ECS deployments (2.06 — phase 3)" />} />
+              {/* Deployments = provisioning an ecs-service; source-to-image builds come with the GitHub App */}
+              <Route path="/deployments" element={<CreateResourceWizard templateOverride="ecs-service" />} />
               <Route path="/runbooks" element={<RunbooksPage />} />
               <Route
                 path="/audit"
@@ -181,21 +183,12 @@ export default function App() {
                   </RequireRole>
                 }
               />
-              <Route path="*" element={<Navigate to="/" replace />} />
+              <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </Suspense>
         }
       />
     </MeContext.Provider>
-  );
-}
-
-function ComingSoon({ title }: { title: string }) {
-  return (
-    <Box textAlign="center" padding="xxl" color="text-status-inactive">
-      <b>{title}</b>
-      <Box variant="p">This screen lands in a later phase of the implementation checklist (9.2).</Box>
-    </Box>
   );
 }
 

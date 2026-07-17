@@ -22,6 +22,12 @@ public class TeamEntity {
 
     protected TeamEntity() {}
 
+    public TeamEntity(UUID id, String name, String costCenter) {
+        this.id = id;
+        this.name = name;
+        this.costCenter = costCenter;
+    }
+
     public UUID getId() {
         return id;
     }
