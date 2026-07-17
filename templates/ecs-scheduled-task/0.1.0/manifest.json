@@ -1,0 +1,23 @@
+{
+  "manifestSchemaVersion": 1,
+  "templateId": "ecs-scheduled-task",
+  "version": "0.1.0",
+  "category": "Compute",
+  "displayName": "Scheduled Task",
+  "description": "Run a container on a cron/rate schedule on the platform cluster (the Kubernetes CronJob equivalent on ECS) - ETLs, syncs, report jobs; no always-on cost.",
+  "renderMode": "parameter",
+  "parameterMap": {
+    "taskName": "TaskName",
+    "image": "Image",
+    "schedule": "Schedule",
+    "cpu": "Cpu",
+    "memory": "Memory"
+  },
+  "maturity": "beta",
+  "owners": ["platform-team"],
+  "estimatedMonthlyCost": "~$0.01 per run-hour at 0.25vCPU/512MB - pay only while running",
+  "cfnCapabilities": ["CAPABILITY_NAMED_IAM"],
+  "examples": [
+    { "taskName": "list-synchronizer", "image": "public.ecr.aws/docker/library/alpine:3.20", "schedule": "rate(6 hours)", "cpu": "256", "memory": "512" }
+  ]
+}

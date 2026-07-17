@@ -73,7 +73,15 @@ export default function ResourceGroupsPage() {
           <Container
             key={name}
             header={
-              <Header variant="h2" counter={`(${templates.size} resource${templates.size > 1 ? "s" : ""})`}>
+              <Header
+                variant="h2"
+                counter={`(${templates.size} resource${templates.size > 1 ? "s" : ""})`}
+                actions={
+                  <Button onClick={() => navigate(`/catalog?group=${encodeURIComponent(name)}`)}>
+                    Provision in this group
+                  </Button>
+                }
+              >
                 {name}
               </Header>
             }
