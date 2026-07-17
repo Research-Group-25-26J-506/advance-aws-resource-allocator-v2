@@ -36,6 +36,11 @@ jobs:
           role-session-name: ${{ github.actor }}-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Publish OTel sidecar config
+        run: |
+          aws ssm put-parameter --name /platform/otel/sidecar/config --type String --overwrite \
+            --value "$(cat configs/otel-sidecar.yaml)" >/dev/null
+
       - name: Seed template registry
         run: |
           BUCKET=$(aws ssm get-parameter --name /platform/dev/templates-bucket --query 'Parameter.Value' --output text)

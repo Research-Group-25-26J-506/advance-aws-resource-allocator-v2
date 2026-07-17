@@ -16,10 +16,6 @@ Parameters:
     Type: String
     Default: platform
     Description: Repository name for OIDC trust conditions
-  DeployBranch:
-    Type: String
-    Default: develop
-    Description: Branch whose pushes may assume the deploy role (non-prod)
 
 Conditions:
   IsProd: !Equals [!Ref EnvironmentName, prod]
