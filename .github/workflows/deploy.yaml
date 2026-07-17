@@ -1,5 +1,6 @@
-# Deploy stacks (7.05). dev auto after images build; stg after dev; prod behind manual
-# environment approval. Stack order: network → data → auth → compute.
+# Deploy (7.05, simplified to the single-platform model): ONE platform deployment. Resource
+# environments (dev/qa/stg/prod) are a property of provisioned resources — the worker assumes
+# per-template execution roles that can target other accounts — not separate platform copies.
 name: deploy
 
 on:
@@ -7,13 +8,7 @@ on:
     workflows: [build-images]
     types: [completed]
     branches: [main, develop]
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: Target environment
-        type: choice
-        options: [platform-dev, platform-stg, platform-prod]
-        default: platform-dev
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -22,12 +17,11 @@ env:
   AWS_REGION: us-east-1
 
 jobs:
-  deploy-dev:
+  deploy:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    environment: platform-dev
     concurrency:
-      group: deploy-platform-dev # never two overlapping deploys per env (7.05 enhancement)
+      group: deploy-platform # never two overlapping deploys
       cancel-in-progress: false
     permissions:
       contents: read
@@ -42,32 +36,38 @@ jobs:
           role-session-name: ${{ github.actor }}-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Publish OTel sidecar config
+        run: |
+          aws ssm put-parameter --name /platform/otel/sidecar/config --type String --overwrite \
+            --value "$(cat configs/otel-sidecar.yaml)" >/dev/null
+
       - name: Seed template registry
         run: |
           BUCKET=$(aws ssm get-parameter --name /platform/dev/templates-bucket --query 'Parameter.Value' --output text)
-          # Interim publisher until the sync pipeline (3.09) lands: versions are immutable, so
-          # sync without --delete and never overwrite existing version prefixes.
+          # Interim publisher alongside the sync pipeline: never deletes, never overwrites versions
           aws s3 sync templates/ "s3://${BUCKET}/templates/" --size-only
+
       - name: Deploy stacks in order
         run: |
           set -euo pipefail
-          ENV=dev
           SHA=$(git rev-parse --short HEAD)
           deploy() {
             local name="$1" template="$2"; shift 2
-            echo "::group::Deploy platform-${name}-${ENV}"
+            echo "::group::platform-${name}-dev"
             aws cloudformation deploy \
-              --stack-name "platform-${name}-${ENV}" \
+              --stack-name "platform-${name}-dev" \
               --template-file "$template" \
-              --capabilities CAPABILITY_NAMED_IAM \
+              --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
               --no-fail-on-empty-changeset \
-              --parameter-overrides EnvironmentName="${ENV}" "$@"
+              --parameter-overrides EnvironmentName=dev "$@"
             echo "::endgroup::"
           }
-          deploy network infrastructure/platform/network.yaml
-          deploy data infrastructure/platform/data.yaml
+          deploy network infrastructure/platform/network.yaml NatStrategy=single EndpointProfile=minimal
+          deploy data infrastructure/platform/data.yaml DbTier=serverless
           deploy auth infrastructure/platform/auth.yaml
           deploy compute infrastructure/platform/compute.yaml ImageTag="${SHA}" Scale=dev
+          deploy observability infrastructure/platform/observability.yaml
+          deploy cdn infrastructure/platform/cdn.yaml
 
       - name: Roll ECS services and wait for stability
         run: |
@@ -79,43 +79,11 @@ jobs:
 
       - name: Post-deploy smoke test
         run: |
-          ALB=$(aws ssm get-parameter --name /platform/dev/alb-dns --query 'Parameter.Value' --output text)
-          curl --retry 5 --retry-delay 10 -fsS "http://${ALB}/healthz"
-          curl --retry 5 --retry-delay 10 -fsS "http://${ALB}/api/v1/me" -o /dev/null -w '%{http_code}\n' | grep -E '200|401'
+          CDN=$(aws ssm get-parameter --name /platform/dev/cdn-domain --query 'Parameter.Value' --output text)
+          curl --retry 5 --retry-delay 10 -fsS "https://${CDN}/healthz"
+          curl -s -o /dev/null -w '%{http_code}' "https://${CDN}/api/v1/config" | grep -q 200
 
-      - name: Record deployed SHA (rollback + dashboards read this)
+      - name: Record deployed SHA
         run: |
           aws ssm put-parameter --name /platform/dev/deployed-sha \
             --value "$(git rev-parse --short HEAD)" --type String --overwrite
-
-  deploy-stg:
-    needs: deploy-dev
-    if: github.event_name != 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    environment: platform-stg
-    concurrency:
-      group: deploy-platform-stg
-      cancel-in-progress: false
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.0
-      - name: Placeholder
-        run: echo "STG deploy mirrors dev with EnvironmentName=stg once the stg account exists (phase 4)."
-
-  deploy-prod:
-    needs: deploy-stg
-    if: github.event_name != 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    environment: platform-prod # manual approval gate lives on this GitHub environment
-    concurrency:
-      group: deploy-platform-prod
-      cancel-in-progress: false
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.0
-      - name: Placeholder
-        run: echo "PROD deploy mirrors dev with Scale=prod, DbTier=provisioned, NatStrategy=per-az (phase 4)."

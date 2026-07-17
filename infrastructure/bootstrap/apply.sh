@@ -3,10 +3,9 @@
 set -euo pipefail
 export MSYS_NO_PATHCONV=1   # Git Bash on Windows: stop mangling /platform/... into C:/...
 
-ENV="${1:?Usage: apply.sh <dev|stg|prod> <github-org> [repo] [deploy-branch]}"
-ORG="${2:?Usage: apply.sh <dev|stg|prod> <github-org> [repo] [deploy-branch]}"
+ENV="${1:?Usage: apply.sh <dev|stg|prod> <github-org> [repo]}"
+ORG="${2:?Usage: apply.sh <dev|stg|prod> <github-org> [repo]}"
 REPO="${3:-platform}"
-BRANCH="${4:-develop}"
 STACK="platform-bootstrap-${ENV}"
 
 aws cloudformation deploy \
@@ -17,8 +16,7 @@ aws cloudformation deploy \
   --parameter-overrides \
     "EnvironmentName=${ENV}" \
     "GitHubOrg=${ORG}" \
-    "GitHubRepo=${REPO}" \
-    "DeployBranch=${BRANCH}"
+    "GitHubRepo=${REPO}"
 
 echo ""
 echo "Bootstrap applied. SSM parameters written under /platform/${ENV}/:"
