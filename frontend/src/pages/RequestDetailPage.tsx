@@ -9,6 +9,7 @@ import ColumnLayout from "@cloudscape-design/components/column-layout";
 import Container from "@cloudscape-design/components/container";
 import ContentLayout from "@cloudscape-design/components/content-layout";
 import ExpandableSection from "@cloudscape-design/components/expandable-section";
+import Flashbar, { FlashbarProps } from "@cloudscape-design/components/flashbar";
 import Header from "@cloudscape-design/components/header";
 import Input from "@cloudscape-design/components/input";
 import Modal from "@cloudscape-design/components/modal";
@@ -33,7 +34,37 @@ export default function RequestDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [deleteVisible, setDeleteVisible] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [actionBusy, setActionBusy] = useState(false);
+  const [flashes, setFlashes] = useState<FlashbarProps.MessageDefinition[]>([]);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const flash = (type: "success" | "error", content: string) => {
+    const id = String(Date.now());
+    setFlashes((current) => [
+      ...current,
+      {
+        id,
+        type,
+        content,
+        dismissible: true,
+        onDismiss: () => setFlashes((f) => f.filter((m) => m.id !== id)),
+      },
+    ]);
+    setTimeout(() => setFlashes((f) => f.filter((m) => m.id !== id)), 6000);
+  };
+
+  const runAction = async (label: string, action: () => Promise<unknown>) => {
+    setActionBusy(true);
+    try {
+      await action();
+      flash("success", label);
+      refresh();
+    } catch (e) {
+      flash("error", `${label.split(" ")[0]} failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setActionBusy(false);
+    }
+  };
 
   const refresh = useCallback(() => {
     if (!id) return;
@@ -95,14 +126,17 @@ export default function RequestDetailPage() {
           variant="h1"
           actions={
             <ButtonDropdown
+              loading={actionBusy}
               items={[
                 { id: "retry", text: "Retry", disabled: !failed },
                 { id: "delete", text: "Delete", disabled: isInProgress(request.status) },
                 { id: "console", text: "View in AWS Console", external: true, disabled: !request.stackId },
               ]}
-              onItemClick={async (e) => {
+              onItemClick={(e) => {
                 if (e.detail.id === "retry") {
-                  await api.retryRequest(request.id).then(setRequest).catch((err) => setError(String(err)));
+                  runAction("Retry queued — the request is back in the worker queue", () =>
+                    api.retryRequest(request.id).then(setRequest),
+                  );
                 }
                 if (e.detail.id === "delete") setDeleteVisible(true);
                 if (e.detail.id === "console" && request.stackId) {
@@ -123,6 +157,7 @@ export default function RequestDetailPage() {
       }
     >
       <SpaceBetween size="l">
+        <Flashbar items={flashes} />
         {error && (
           <Alert type="error" dismissible onDismiss={() => setError(null)}>
             {error}
@@ -132,7 +167,18 @@ export default function RequestDetailPage() {
           <Alert
             type="error"
             header="This request failed"
-            action={<Button onClick={() => api.retryRequest(request.id).then(setRequest)}>Retry</Button>}
+            action={
+              <Button
+                loading={actionBusy}
+                onClick={() =>
+                  runAction("Retry queued — the request is back in the worker queue", () =>
+                    api.retryRequest(request.id).then(setRequest),
+                  )
+                }
+              >
+                Retry
+              </Button>
+            }
           >
             {request.failureReason}
           </Alert>
@@ -273,10 +319,13 @@ export default function RequestDetailPage() {
               </Button>
               <Button
                 variant="primary"
+                loading={actionBusy}
                 disabled={deleteConfirmText !== request.resourceName}
-                onClick={async () => {
+                onClick={() => {
                   setDeleteVisible(false);
-                  await api.deleteRequest(request.id).then(setRequest).catch((e) => setError(String(e)));
+                  runAction("Deletion started — the stack is being removed", () =>
+                    api.deleteRequest(request.id).then(setRequest),
+                  );
                 }}
               >
                 Delete

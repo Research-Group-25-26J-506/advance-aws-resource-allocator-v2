@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useState } from "react";
-import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import AppLayout from "@cloudscape-design/components/app-layout";
 import Box from "@cloudscape-design/components/box";
 import BreadcrumbGroup from "@cloudscape-design/components/breadcrumb-group";
@@ -25,6 +25,7 @@ const SyncAdminPage = lazy(() => import("./pages/SyncAdminPage"));
 const ApprovalsPage = lazy(() => import("./pages/ApprovalsPage"));
 const AuditLogPage = lazy(() => import("./pages/AuditLogPage"));
 const RunbooksPage = lazy(() => import("./pages/RunbooksPage"));
+const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
 const TemplatesAdminPage = lazy(() => import("./pages/TemplatesAdminPage"));
 
 export default function App() {
@@ -181,7 +182,7 @@ export default function App() {
                   </RequireRole>
                 }
               />
-              <Route path="*" element={<Navigate to="/" replace />} />
+              <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </Suspense>
         }

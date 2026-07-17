@@ -14,7 +14,7 @@ import type {
   Template,
   TemplateDetail,
 } from "./types";
-import { accessToken } from "../auth/auth";
+import { accessToken, handleUnauthorized } from "../auth/auth";
 import { mockHandler } from "../mocks/mockApi";
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === "true";
@@ -57,6 +57,10 @@ async function call<T>(method: string, path: string, body?: unknown, idempotency
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!response.ok) {
+    if (response.status === 401) {
+      handleUnauthorized(); // session expired — kick off re-login (no-op in dev-bypass)
+      throw new ApiError(401, "UNAUTHENTICATED", "Your session expired — signing you back in…");
+    }
     const problem = await response.json().catch(() => ({}));
     throw new ApiError(response.status, problem.code ?? "UNKNOWN", problem.detail ?? response.statusText);
   }
