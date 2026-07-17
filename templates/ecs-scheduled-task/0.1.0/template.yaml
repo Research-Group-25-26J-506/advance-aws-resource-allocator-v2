@@ -94,7 +94,7 @@ Resources:
                 Action: iam:PassRole
                 Resource: !GetAtt ExecutionRole.Arn
 
-  Schedule:
+  TaskSchedule:
     Type: AWS::Scheduler::Schedule
     Properties:
       Name: !Sub platform-app-${TaskName}-${Environment}
@@ -118,5 +118,5 @@ Resources:
 
 Outputs:
   TaskDefinitionArn: { Value: !Ref TaskDef }
-  ScheduleName: { Value: !Ref Schedule }
+  ScheduleName: { Value: !Ref TaskSchedule }
   LogGroupName: { Value: !Ref LogGroup }
