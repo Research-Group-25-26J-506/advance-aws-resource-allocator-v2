@@ -79,6 +79,9 @@ export const api = {
   listTemplates: () => call<Template[]>("GET", "/templates?maturity=stable,beta"),
   getTemplate: (id: string) => call<TemplateDetail>("GET", `/templates/${id}`),
 
+  listGroups: () => call<{ name: string; description: string }[]>("GET", "/groups"),
+  createGroup: (name: string, description: string) =>
+    call<{ name: string }>("POST", "/groups", { name, description }, uuidv7()),
   listAudit: () => call<AuditEntry[]>("GET", "/audit"),
   listRunbooks: () => call<Runbook[]>("GET", "/runbooks"),
   listApprovals: () => call<PendingApproval[]>("GET", "/approvals"),
@@ -94,6 +97,7 @@ export const api = {
   listMyRequests: (limit = 20) => call<PlatformRequest[]>("GET", `/requests?requester=me&limit=${limit}`),
   getRequest: (id: string) => call<PlatformRequest>("GET", `/requests/${id}`),
   getRequestEvents: (id: string) => call<RequestEvent[]>("GET", `/requests/${id}/events`),
+  getRequestOutputs: (id: string) => call<{ key: string; value: string }[]>("GET", `/requests/${id}/outputs`),
   createRequest: (payload: CreateRequestPayload, idempotencyKey: string) =>
     call<PlatformRequest>("POST", "/requests", payload, idempotencyKey),
   retryRequest: (id: string) => call<PlatformRequest>("POST", `/requests/${id}/retry`, undefined, uuidv7()),

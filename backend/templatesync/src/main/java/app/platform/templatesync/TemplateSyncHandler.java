@@ -208,7 +208,7 @@ public class TemplateSyncHandler {
         }
     }
 
-    static byte[] uuidBytes(UUID uuid) {
+    public static byte[] uuidBytes(UUID uuid) {
         java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(16);
         buffer.putLong(uuid.getMostSignificantBits());
         buffer.putLong(uuid.getLeastSignificantBits());

@@ -32,6 +32,7 @@ export default function RequestDetailPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [request, setRequest] = useState<PlatformRequest | null>(null);
   const [events, setEvents] = useState<RequestEvent[]>([]);
+  const [outputs, setOutputs] = useState<{ key: string; value: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [deleteVisible, setDeleteVisible] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
@@ -71,6 +72,7 @@ export default function RequestDetailPage() {
     if (!id) return;
     api.getRequest(id).then(setRequest).catch((e) => setError(String(e)));
     api.getRequestEvents(id).then(setEvents).catch(() => undefined);
+    api.getRequestOutputs(id).then(setOutputs).catch(() => undefined);
   }, [id]);
 
   // SSE preferred; fall back to 5s polling while in progress (stop on terminal state)
@@ -291,6 +293,12 @@ export default function RequestDetailPage() {
                       </span>
                     </Box>
                   </div>
+                  {outputs.map((output) => (
+                    <div key={output.key}>
+                      <Box variant="awsui-key-label">{output.key}</Box>
+                      <Box>{output.value}</Box>
+                    </div>
+                  ))}
                 </ColumnLayout>
               ),
             },

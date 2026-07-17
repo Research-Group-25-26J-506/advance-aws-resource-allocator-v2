@@ -4,6 +4,9 @@ import Badge from "@cloudscape-design/components/badge";
 import Box from "@cloudscape-design/components/box";
 import Button from "@cloudscape-design/components/button";
 import Container from "@cloudscape-design/components/container";
+import FormField from "@cloudscape-design/components/form-field";
+import Input from "@cloudscape-design/components/input";
+import Modal from "@cloudscape-design/components/modal";
 import ContentLayout from "@cloudscape-design/components/content-layout";
 import Header from "@cloudscape-design/components/header";
 import SpaceBetween from "@cloudscape-design/components/space-between";
@@ -21,13 +24,41 @@ import { platformEnvironments } from "../auth/auth";
 export default function ResourceGroupsPage() {
   const navigate = useNavigate();
   const [requests, setRequests] = useState<PlatformRequest[] | null>(null);
+  const [declaredGroups, setDeclaredGroups] = useState<{ name: string; description: string }[]>([]);
+  const [createVisible, setCreateVisible] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newDescription, setNewDescription] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const refresh = () => {
     api.listMyRequests(100).then(setRequests).catch(() => setRequests([]));
-  }, []);
+    api.listGroups().then(setDeclaredGroups).catch(() => undefined);
+  };
+  useEffect(refresh, []);
+
+  const createGroup = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.createGroup(newName, newDescription);
+      setCreateVisible(false);
+      setNewName("");
+      setNewDescription("");
+      refresh();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const groups = useMemo(() => {
     const byName = new Map<string, Map<string, Map<string, PlatformRequest>>>();
+    // declared-but-empty groups appear first-class, ready to receive resources
+    for (const group of declaredGroups) {
+      byName.set(group.name, new Map());
+    }
     for (const request of requests ?? []) {
       const templates = byName.get(request.resourceName) ?? new Map();
       const envs = templates.get(request.templateId) ?? new Map();
@@ -39,7 +70,7 @@ export default function ResourceGroupsPage() {
       byName.set(request.resourceName, templates);
     }
     return [...byName.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [requests]);
+  }, [requests, declaredGroups]);
 
   const envChain = platformEnvironments();
 
@@ -57,7 +88,14 @@ export default function ResourceGroupsPage() {
         <Header
           variant="h1"
           description="One group per resource name — its resources across every environment. Promote from any environment's request page."
-          actions={<Button variant="primary" onClick={() => navigate("/catalog")}>Provision a resource</Button>}
+          actions={
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button onClick={() => setCreateVisible(true)}>Create resource group</Button>
+              <Button variant="primary" onClick={() => navigate("/catalog")}>
+                Provision a resource
+              </Button>
+            </SpaceBetween>
+          }
         >
           Resources
         </Header>
@@ -87,6 +125,11 @@ export default function ResourceGroupsPage() {
             }
           >
             <SpaceBetween size="s">
+              {templates.size === 0 && (
+                <Box color="text-status-inactive">
+                  Empty group — use "Provision in this group" to attach its first resource.
+                </Box>
+              )}
               {[...templates.entries()].map(([templateId, envs]) => (
                 <SpaceBetween key={templateId} direction="horizontal" size="m" alignItems="center">
                   <Box fontWeight="bold" padding={{ right: "s" }}>
@@ -115,6 +158,38 @@ export default function ResourceGroupsPage() {
           </Container>
         ))}
       </SpaceBetween>
+
+      <Modal
+        visible={createVisible}
+        onDismiss={() => setCreateVisible(false)}
+        header="Create resource group"
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={() => setCreateVisible(false)}>
+                Cancel
+              </Button>
+              <Button variant="primary" loading={busy} onClick={createGroup}>
+                Create group
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween size="m">
+          {error && <Box color="text-status-error">{error}</Box>}
+          <FormField label="Group name" constraintText="Lowercase letters, digits, hyphens; 3–63 chars.">
+            <Input value={newName} onChange={(e) => setNewName(e.detail.value)} placeholder="pastry-plus" />
+          </FormField>
+          <FormField label="Description — optional">
+            <Input value={newDescription} onChange={(e) => setNewDescription(e.detail.value)} />
+          </FormField>
+          <Box color="text-status-inactive" fontSize="body-s">
+            Step 2: open the group and use "Provision in this group" — every resource provisioned
+            under this name becomes a member, per environment.
+          </Box>
+        </SpaceBetween>
+      </Modal>
     </ContentLayout>
   );
 }

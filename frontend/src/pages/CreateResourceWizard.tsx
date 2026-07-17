@@ -100,8 +100,10 @@ export default function CreateResourceWizard({ templateOverride }: { templateOve
     // group preselection (?group=) + existing group suggestions for the name field
     const preset = searchParams.get("group");
     if (preset) setResourceName(preset);
-    api.listMyRequests(100)
-      .then((requests) => setGroupNames([...new Set(requests.map((r) => r.resourceName))]))
+    Promise.all([api.listMyRequests(100).catch(() => []), api.listGroups().catch(() => [])])
+      .then(([requests, groups]) =>
+        setGroupNames([...new Set([...groups.map((g) => g.name), ...requests.map((r) => r.resourceName)])]),
+      )
       .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
