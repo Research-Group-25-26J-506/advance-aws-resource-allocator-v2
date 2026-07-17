@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# One-time (idempotent) bootstrap apply. Usage: ./apply.sh <env> <github-org> [repo] [deploy-branch]
+# One-time (idempotent) bootstrap apply. Usage: ./apply.sh <env> <github-org> [repo]
+# NOTE: GitHub OIDC subjects embed immutable IDs: pass org/repo as "Name@id", e.g.
+#   ./apply.sh dev "Research-Group-25-26J-506@222281801" "advance-aws-resource-allocator-v2@1301328053"
+# Find the ids at https://api.github.com/orgs/<org> and /repos/<org>/<repo> ("id" field). [deploy-branch]
 set -euo pipefail
 export MSYS_NO_PATHCONV=1   # Git Bash on Windows: stop mangling /platform/... into C:/...
 
