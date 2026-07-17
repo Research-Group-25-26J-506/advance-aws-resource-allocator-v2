@@ -28,6 +28,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.0
+        with:
+          fetch-depth: 2 # the infra-change detection diffs against the parent commit
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d # v6.2.2
@@ -47,10 +49,22 @@ jobs:
           # Interim publisher alongside the sync pipeline: never deletes, never overwrites versions
           aws s3 sync templates/ "s3://${BUCKET}/templates/" --size-only
 
-      - name: Deploy stacks in order
+      - name: Detect infrastructure changes
+        id: infra
+        run: |
+          # Full stack pass only when infrastructure changed in this push; a code-only merge
+          # just rolls ECS onto the new image tag via a compute-stack update.
+          BEFORE="${{ github.event.workflow_run.head_sha || github.sha }}"
+          if git diff --quiet "${BEFORE}~1" "${BEFORE}" -- infrastructure/ 2>/dev/null; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy stacks in order (infra changed)
+        if: steps.infra.outputs.changed == 'true'
         run: |
           set -euo pipefail
-          SHA=$(git rev-parse --short HEAD)
           deploy() {
             local name="$1" template="$2"; shift 2
             echo "::group::platform-${name}-dev"
@@ -65,9 +79,20 @@ jobs:
           deploy network infrastructure/platform/network.yaml NatStrategy=single EndpointProfile=minimal
           deploy data infrastructure/platform/data.yaml DbTier=serverless
           deploy auth infrastructure/platform/auth.yaml
-          deploy compute infrastructure/platform/compute.yaml ImageTag="${SHA}" Scale=dev
           deploy observability infrastructure/platform/observability.yaml
           deploy cdn infrastructure/platform/cdn.yaml
+
+      - name: Ship the new image (always)
+        run: |
+          # New task-def revision pinned to this commit's immutable tag — this IS the
+          # "restart ECS with the updated image"; ~2-4 min when nothing else changed.
+          SHA=$(git rev-parse --short HEAD)
+          aws cloudformation deploy \
+            --stack-name platform-compute-dev \
+            --template-file infrastructure/platform/compute.yaml \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides EnvironmentName=dev ImageTag="${SHA}" Scale=dev
 
       - name: Roll ECS services and wait for stability
         run: |
