@@ -19,6 +19,13 @@ subprojects {
         }
     }
 
+    // CVE floor for BOM-managed transitives (Trivy gate in build-images); the dependency-
+    // management plugin honours these version properties over the Boot BOM.
+    ext["tomcat.version"] = "10.1.55"
+    ext["netty.version"] = "4.1.135.Final"
+    ext["spring-security.version"] = "6.5.9"
+    ext["jackson-bom.version"] = "2.21.4"
+
     the<io.spring.gradle.dependencymanagement.dsl.DependencyManagementExtension>().apply {
         imports {
             mavenBom(org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES)

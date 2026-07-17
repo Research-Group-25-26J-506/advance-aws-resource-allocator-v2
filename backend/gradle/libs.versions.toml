@@ -1,9 +1,9 @@
 # Version catalog (3.01 enhancement): every dependency pinned here, nowhere else.
 [versions]
-springBoot = "3.5.7"
+springBoot = "3.5.14"
 springDependencyManagement = "1.1.7"
 awsSdk = "2.28.11"
-jinjava = "2.7.3"
+jinjava = "2.8.3" # 2.7.x has CRITICAL sandbox-bypass CVEs — the renderer's whole job is that sandbox
 jsonSchemaValidator = "1.5.2"
 uuidCreator = "6.0.0"
 logstashEncoder = "8.0"
