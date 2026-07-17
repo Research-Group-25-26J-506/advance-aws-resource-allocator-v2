@@ -34,9 +34,23 @@ public class RequestController {
     private final ScheduledExecutorService ssePool = Executors.newScheduledThreadPool(2);
 
     private final RequestService service;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
 
-    public RequestController(RequestService service) {
+    public RequestController(RequestService service, org.springframework.jdbc.core.JdbcTemplate jdbc) {
         this.service = service;
+        this.jdbc = jdbc;
+    }
+
+    /** Stack outputs captured on terminal success (endpoint, port, secret ARN, ...). */
+    @GetMapping("/{id}/outputs")
+    @PreAuthorize("isAuthenticated()")
+    public List<java.util.Map<String, Object>> outputs(@PathVariable UUID id) {
+        service.get(id); // 404 if unknown
+        return jdbc.query(
+                "SELECT output_key, output_value FROM resource_outputs WHERE request_id = ? ORDER BY output_key",
+                (rs, i) -> java.util.Map.of(
+                        "key", rs.getString("output_key"), "value", rs.getString("output_value")),
+                app.platform.templatesync.TemplateSyncHandler.uuidBytes(id));
     }
 
     @PostMapping

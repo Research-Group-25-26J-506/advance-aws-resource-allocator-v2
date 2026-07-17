@@ -97,6 +97,7 @@ export const api = {
   listMyRequests: (limit = 20) => call<PlatformRequest[]>("GET", `/requests?requester=me&limit=${limit}`),
   getRequest: (id: string) => call<PlatformRequest>("GET", `/requests/${id}`),
   getRequestEvents: (id: string) => call<RequestEvent[]>("GET", `/requests/${id}/events`),
+  getRequestOutputs: (id: string) => call<{ key: string; value: string }[]>("GET", `/requests/${id}/outputs`),
   createRequest: (payload: CreateRequestPayload, idempotencyKey: string) =>
     call<PlatformRequest>("POST", "/requests", payload, idempotencyKey),
   retryRequest: (id: string) => call<PlatformRequest>("POST", `/requests/${id}/retry`, undefined, uuidv7()),
