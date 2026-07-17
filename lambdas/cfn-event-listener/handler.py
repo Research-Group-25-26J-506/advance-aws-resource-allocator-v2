@@ -63,6 +63,9 @@ def _connect():
         database=os.environ.get("DB_NAME", "platform"),
         connect_timeout=5,
         autocommit=False,
+        # RDS Proxy has RequireTLS; a non-empty ssl dict makes pymysql negotiate TLS with the
+        # default context (Amazon roots are in the Lambda runtime's trust store)
+        ssl={"enable_tls": True},
     )
 
 
