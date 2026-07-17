@@ -8,6 +8,7 @@ import app.platform.domain.port.StackLauncher;
 import app.platform.domain.port.TemplateRepository;
 import app.platform.domain.port.TemplateStore;
 import app.platform.messaging.WorkMessage;
+import app.platform.worker.aws.ExecRoleResolver;
 import app.platform.worker.consume.WorkDispatcher.Outcome;
 import java.time.Instant;
 import org.slf4j.Logger;
@@ -24,18 +25,21 @@ public class DeleteHandler {
     private final TemplateStore templateStore;
     private final StackLauncher stackLauncher;
     private final AwsErrorClassifier errorClassifier;
+    private final ExecRoleResolver execRoles;
 
     public DeleteHandler(
             RequestRepository requests,
             TemplateRepository templates,
             TemplateStore templateStore,
             StackLauncher stackLauncher,
-            AwsErrorClassifier errorClassifier) {
+            AwsErrorClassifier errorClassifier,
+            ExecRoleResolver execRoles) {
         this.requests = requests;
         this.templates = templates;
         this.templateStore = templateStore;
         this.stackLauncher = stackLauncher;
         this.errorClassifier = errorClassifier;
+        this.execRoles = execRoles;
     }
 
     public Outcome handle(WorkMessage work) {
@@ -62,7 +66,8 @@ public class DeleteHandler {
                     .orElse(null);
             stackLauncher.deleteStack(
                     request.stackId(),
-                    manifest == null ? null : manifest.executionRoleArn(),
+                    execRoles.resolve(
+                            manifest == null ? null : manifest.executionRoleArn(), request.templateId()),
                     request.environment(),
                     request.region());
             log.info("DeleteStack initiated for request {}", request.id());

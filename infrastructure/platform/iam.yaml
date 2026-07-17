@@ -1,0 +1,58 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Per-template execution roles (3.06/6.07). The worker STS-assumes these to run CloudFormation —
+  resolution order: manifest.executionRoleArn, SSM /platform/{env}/exec-roles/{templateId},
+  then /platform/{env}/exec-roles/default. Add a scoped role per template as it matures; the
+  default role keeps new templates working meanwhile (single-account posture).
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [dev, stg, prod]
+
+Resources:
+  DefaultExecRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-exec-default-${EnvironmentName}
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:role/platform-${EnvironmentName}-worker-task-role
+            Action: sts:AssumeRole
+      # Resource stacks span many services; PowerUser minus IAM, with IAM limited to roles the
+      # templates themselves create (lambda exec roles etc. under a recognisable prefix).
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/PowerUserAccess
+      Policies:
+        - PolicyName: template-owned-iam
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:PassRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/platform-*
+
+  SsmDefaultExecRole:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/exec-roles/default
+      Type: String
+      Value: !GetAtt DefaultExecRole.Arn
+
+Outputs:
+  DefaultExecRoleArn: { Value: !GetAtt DefaultExecRole.Arn }

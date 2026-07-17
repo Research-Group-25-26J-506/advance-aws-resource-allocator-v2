@@ -79,6 +79,7 @@ jobs:
           deploy network infrastructure/platform/network.yaml NatStrategy=single EndpointProfile=minimal
           deploy data infrastructure/platform/data.yaml DbTier=serverless
           deploy auth infrastructure/platform/auth.yaml
+          deploy iam infrastructure/platform/iam.yaml
           deploy observability infrastructure/platform/observability.yaml
           deploy cdn infrastructure/platform/cdn.yaml
 
