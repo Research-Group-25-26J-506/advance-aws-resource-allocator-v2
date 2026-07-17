@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DynamoDB Table",
+  "type": "object",
+  "required": ["tableName", "partitionKeyName"],
+  "additionalProperties": false,
+  "properties": {
+    "tableName": {
+      "type": "string",
+      "title": "Table name",
+      "pattern": "^[a-zA-Z0-9_.-]{3,255}$"
+    },
+    "partitionKeyName": {
+      "type": "string",
+      "title": "Partition key attribute",
+      "default": "pk"
+    },
+    "partitionKeyType": {
+      "type": "string",
+      "title": "Partition key type",
+      "enum": ["S", "N", "B"],
+      "default": "S",
+      "x-help": "S = string, N = number, B = binary."
+    },
+    "sortKeyName": {
+      "type": "string",
+      "title": "Sort key attribute (optional)",
+      "x-help": "Leave empty for a simple primary key."
+    },
+    "sortKeyType": {
+      "type": "string",
+      "title": "Sort key type",
+      "enum": ["S", "N", "B"],
+      "default": "S"
+    },
+    "pitrEnabled": {
+      "type": "boolean",
+      "title": "Point-in-time recovery",
+      "default": true
+    },
+    "ttlAttribute": {
+      "type": "string",
+      "title": "TTL attribute (optional)",
+      "x-help": "Epoch-seconds attribute for automatic expiry; leave empty to disable."
+    }
+  }
+}

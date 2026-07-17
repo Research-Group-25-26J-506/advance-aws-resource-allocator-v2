@@ -1,0 +1,27 @@
+{
+  "manifestSchemaVersion": 1,
+  "templateId": "sns-topic",
+  "version": "0.2.0",
+  "category": "Integration",
+  "displayName": "SNS Topic",
+  "description": "SNS topic encrypted at rest with TLS-only publishing; standard or FIFO.",
+  "renderMode": "parameter",
+  "parameterMap": {
+    "topicName": "TopicName",
+    "topicDisplayName": "TopicDisplayName",
+    "fifoTopic": "FifoTopic"
+  },
+  "maturity": "beta",
+  "owners": [
+    "platform-team"
+  ],
+  "estimatedMonthlyCost": "~$0 under 1M publishes, then $0.50/M",
+  "cfnCapabilities": [],
+  "examples": [
+    {
+      "topicName": "deploy-notifications",
+      "topicDisplayName": "Deploys",
+      "fifoTopic": false
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "manifestSchemaVersion": 1,
+  "templateId": "rds-mysql",
+  "version": "0.2.0",
+  "category": "Database",
+  "displayName": "RDS MySQL",
+  "description": "MySQL 8 instance in the platform's private data subnets \u2014 encrypted, RDS-managed master password, 7-day backups.",
+  "renderMode": "parameter",
+  "parameterMap": {
+    "dbIdentifier": "DbIdentifier",
+    "instanceClass": "InstanceClass",
+    "allocatedStorageGb": "AllocatedStorageGb",
+    "databaseName": "DatabaseName",
+    "multiAz": "MultiAz"
+  },
+  "maturity": "beta",
+  "owners": [
+    "platform-team"
+  ],
+  "defaultsByEnv": {
+    "dev": {
+      "instanceClass": "db.t4g.micro",
+      "multiAz": false
+    },
+    "prod": {
+      "multiAz": true
+    }
+  },
+  "estimatedMonthlyCost": "~$12 (t4g.micro single-AZ) to ~$95 (t4g.medium Multi-AZ)",
+  "cfnCapabilities": [],
+  "examples": [
+    {
+      "dbIdentifier": "orders-db",
+      "instanceClass": "db.t4g.small",
+      "allocatedStorageGb": 50,
+      "databaseName": "orders",
+      "multiAz": false
+    }
+  ]
+}

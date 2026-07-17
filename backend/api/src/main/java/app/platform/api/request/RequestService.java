@@ -31,6 +31,10 @@ public class RequestService {
     private final AuditLogger audit;
     private final SpringDataRepos.Teams teams;
 
+    @org.springframework.beans.factory.annotation.Value(
+            "${platform.environments:${PLATFORM_ENVIRONMENTS:DEV,QA,STG,PROD}}")
+    private String environments;
+
     public RequestService(
             RequestRepository requests,
             TemplateRepository templates,
@@ -135,12 +139,15 @@ public class RequestService {
             throw new app.platform.domain.error.IllegalTransitionException(
                     sourceId, source.status(), RequestStatus.QUEUED);
         }
-        Environment next = switch (source.environment()) {
-            case DEV -> Environment.STG;
-            case STG -> Environment.PROD;
-            case PROD -> throw new app.platform.domain.error.NotFoundException(
-                    "Environment above", Environment.PROD);
-        };
+        // Promotion order comes from configuration (SSM-backed), not code — environments are
+        // added/removed without a release.
+        java.util.List<String> chain = java.util.Arrays.asList(environments.split(","));
+        int index = chain.indexOf(source.environment().name());
+        if (index < 0 || index >= chain.size() - 1) {
+            throw new app.platform.domain.error.NotFoundException(
+                    "Environment above", source.environment());
+        }
+        Environment next = Environment.valueOf(chain.get(index + 1).trim());
         Request promoted = submit(
                 actorId,
                 actorEmail,

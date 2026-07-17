@@ -20,6 +20,7 @@ import Tabs from "@cloudscape-design/components/tabs";
 import { api } from "../api/client";
 import type { PlatformRequest, RequestEvent } from "../api/types";
 import PlatformStatus, { isInProgress, isTerminal } from "../components/PlatformStatus";
+import { platformEnvironments } from "../auth/auth";
 import { localWithUtcTitle } from "../util/time";
 
 /**
@@ -149,10 +150,13 @@ export default function RequestDetailPage() {
     );
 
   const failed = request.status.endsWith("_FAILED") || request.status === "FAILED_VALIDATION";
+  const envChain = platformEnvironments();
+  const envIndex = envChain.indexOf(request.environment);
   const promotable =
     (request.status === "CREATE_COMPLETE" || request.status === "UPDATE_COMPLETE") &&
-    request.environment !== "PROD";
-  const nextEnv = request.environment === "DEV" ? "STG" : "PROD";
+    envIndex >= 0 &&
+    envIndex < envChain.length - 1;
+  const nextEnv = promotable ? envChain[envIndex + 1] : "";
   const activeTab = searchParams.get("tab") ?? "overview";
 
   return (

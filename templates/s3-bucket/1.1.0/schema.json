@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "S3 Bucket",
+  "type": "object",
+  "required": ["bucketName"],
+  "additionalProperties": false,
+  "properties": {
+    "bucketName": {
+      "type": "string",
+      "title": "Bucket name",
+      "pattern": "^[a-z0-9.-]{3,63}$",
+      "x-help": "Globally unique prefix; the account id is appended automatically."
+    },
+    "versioning": {
+      "type": "boolean",
+      "title": "Enable versioning",
+      "default": true,
+      "x-help": "Keeps every object version. Required for buckets holding source data."
+    },
+    "storageClass": {
+      "type": "string",
+      "title": "Default storage class",
+      "enum": ["STANDARD", "STANDARD_IA", "INTELLIGENT_TIERING"],
+      "default": "STANDARD"
+    },
+    "expireAfterDays": {
+      "type": "integer",
+      "title": "Expire objects after (days)",
+      "minimum": 0,
+      "maximum": 3650,
+      "default": 0,
+      "x-help": "0 disables expiration."
+    }
+  }
+}

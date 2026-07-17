@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SNS Topic",
+  "type": "object",
+  "required": ["topicName"],
+  "additionalProperties": false,
+  "properties": {
+    "topicName": {
+      "type": "string",
+      "title": "Topic name",
+      "pattern": "^[a-zA-Z0-9_-]{1,250}$",
+      "x-help": "FIFO topics get a .fifo suffix appended automatically."
+    },
+    "topicDisplayName": {
+      "type": "string",
+      "title": "Display name (optional)",
+      "x-help": "Shown as the sender for SMS/email subscriptions."
+    },
+    "fifoTopic": {
+      "type": "boolean",
+      "title": "FIFO topic",
+      "default": false,
+      "x-help": "Strict ordering + exactly-once; only SQS FIFO queues can subscribe."
+    }
+  }
+}

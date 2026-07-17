@@ -1,0 +1,70 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Platform-managed SQS queue — encrypted, optional dead-letter queue with redrive.
+
+Parameters:
+  Environment:
+    Type: String
+    Description: Injected by the platform (dev/qa/stg/prod) - suffixes physical names
+    Default: dev
+  QueueName:
+    Type: String
+    AllowedPattern: "^[a-zA-Z0-9_-]{1,70}$"
+  VisibilityTimeoutSeconds:
+    Type: Number
+    Default: 30
+    MinValue: 0
+    MaxValue: 43200
+  MessageRetentionDays:
+    Type: String
+    AllowedValues: ["1", "4", "7", "14"]
+    Default: "4"
+  WithDlq:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+  MaxReceiveCount:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 100
+
+Conditions:
+  CreateDlq: !Equals [!Ref WithDlq, "true"]
+
+# CFN has no arithmetic — days -> seconds via lookup
+Mappings:
+  RetentionSeconds:
+    days:
+      "1": 86400
+      "4": 345600
+      "7": 604800
+      "14": 1209600
+
+Resources:
+  Dlq:
+    Type: AWS::SQS::Queue
+    Condition: CreateDlq
+    Properties:
+      QueueName: !Sub ${QueueName}-${Environment}-dlq
+      MessageRetentionPeriod: 1209600   # 14 days — keep poison messages as long as possible
+      SqsManagedSseEnabled: true
+
+  Queue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${QueueName}-${Environment}
+      VisibilityTimeout: !Ref VisibilityTimeoutSeconds
+      MessageRetentionPeriod: !FindInMap [RetentionSeconds, days, !Ref MessageRetentionDays]
+      SqsManagedSseEnabled: true
+      RedrivePolicy: !If
+        - CreateDlq
+        - deadLetterTargetArn: !GetAtt Dlq.Arn
+          maxReceiveCount: !Ref MaxReceiveCount
+        - !Ref AWS::NoValue
+
+Outputs:
+  QueueUrl: { Value: !Ref Queue }
+  QueueArn: { Value: !GetAtt Queue.Arn }
+  DlqArn:
+    Condition: CreateDlq
+    Value: !GetAtt Dlq.Arn

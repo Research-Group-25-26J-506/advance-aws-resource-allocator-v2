@@ -289,6 +289,7 @@ Resources:
             - { Name: PLATFORM_COGNITO_ISSUER, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/auth/issuer-uri}}" }
             - { Name: PLATFORM_WEB_CLIENT_ID, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/auth/web-client-id}}" }
             - { Name: PLATFORM_COGNITO_DOMAIN, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/auth/domain}}" }
+            - { Name: PLATFORM_ENVIRONMENTS, Value: "{{resolve:ssm:/platform/config/environments}}" }
           Secrets:
             - Name: PLATFORM_DB_USER
               ValueFrom: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/db/secret-arn}}:username::"

@@ -92,6 +92,12 @@ public class ProvisionHandler {
             String cfnBody = templateStore.fetchBody(version.s3KeyBody());
 
             var rendered = renderer.render(manifest, request.formData(), cfnBody);
+            // Platform-injected parameter: templates declaring `Environment` get the request's
+            // environment (lowercased) so physical names are env-suffixed and promotions never
+            // collide (deltaalpha-...-dev vs -qa vs -stg vs -prod).
+            if (cfnBody.matches("(?s).*\\n {2}Environment:\\s*\\n.*")) {
+                rendered.parameters().put("Environment", request.environment().name().toLowerCase());
+            }
             Team team = teams.findById(request.teamId())
                     .map(t -> new Team(t.getId(), t.getName(), t.getCostCenter()))
                     .orElseThrow(() -> new IllegalStateException("team missing"));

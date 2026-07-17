@@ -2,6 +2,7 @@ package app.platform.domain.model;
 
 public enum Environment {
     DEV,
+    QA,
     STG,
     PROD;
 

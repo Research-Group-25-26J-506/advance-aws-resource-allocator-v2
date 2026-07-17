@@ -2,7 +2,7 @@
 // into the build (2.01 enhancement). Keep in lockstep with backend/api openapi.yaml.
 import type { RequestStatus, SyncStatus } from "../components/PlatformStatus";
 
-export type Environment = "DEV" | "STG" | "PROD";
+export type Environment = "DEV" | "QA" | "STG" | "PROD";
 
 export interface PlatformRequest {
   id: string;

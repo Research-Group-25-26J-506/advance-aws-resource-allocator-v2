@@ -18,6 +18,7 @@ import Toggle from "@cloudscape-design/components/toggle";
 import Wizard from "@cloudscape-design/components/wizard";
 import { api, uuidv7 } from "../api/client";
 import type { Environment, TemplateDetail } from "../api/types";
+import { platformEnvironments } from "../auth/auth";
 
 interface SchemaProperty {
   type?: string;
@@ -275,7 +276,7 @@ export default function CreateResourceWizard({ templateOverride }: { templateOve
                   <FormField label="Environment">
                     <Select
                       selectedOption={{ value: environment, label: environment }}
-                      options={["DEV", "STG", "PROD"].map((v) => ({ value: v, label: v }))}
+                      options={platformEnvironments().map((v) => ({ value: v, label: v }))}
                       onChange={(e) => setEnvironment(e.detail.selectedOption.value as Environment)}
                     />
                   </FormField>

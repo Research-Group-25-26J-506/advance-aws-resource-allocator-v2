@@ -1,0 +1,35 @@
+{
+  "manifestSchemaVersion": 1,
+  "templateId": "ecs-service",
+  "version": "0.2.0",
+  "category": "Compute",
+  "displayName": "ECS Service",
+  "description": "Deploy a container image as a Fargate service on the platform cluster (private app subnets, circuit breaker, CloudWatch logs).",
+  "renderMode": "parameter",
+  "parameterMap": {
+    "serviceName": "ServiceName",
+    "image": "Image",
+    "containerPort": "ContainerPort",
+    "cpu": "Cpu",
+    "memory": "Memory",
+    "desiredCount": "DesiredCount"
+  },
+  "maturity": "beta",
+  "owners": [
+    "platform-team"
+  ],
+  "estimatedMonthlyCost": "~$9/mo per always-on 0.25vCPU/512MB task",
+  "cfnCapabilities": [
+    "CAPABILITY_NAMED_IAM"
+  ],
+  "examples": [
+    {
+      "serviceName": "hello-web",
+      "image": "public.ecr.aws/nginx/nginx:1.27-alpine",
+      "containerPort": 80,
+      "cpu": "256",
+      "memory": "512",
+      "desiredCount": 1
+    }
+  ]
+}
