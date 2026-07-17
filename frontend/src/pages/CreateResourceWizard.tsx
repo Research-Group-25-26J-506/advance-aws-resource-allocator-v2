@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import Autosuggest from "@cloudscape-design/components/autosuggest";
 import Ajv, { ErrorObject } from "ajv";
 import Alert from "@cloudscape-design/components/alert";
 import Box from "@cloudscape-design/components/box";
@@ -48,6 +49,8 @@ export default function CreateResourceWizard({ templateOverride }: { templateOve
   const { templateId: templateParam } = useParams<{ templateId: string }>();
   const templateId = templateOverride ?? templateParam;
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [groupNames, setGroupNames] = useState<string[]>([]);
 
   const [detail, setDetail] = useState<TemplateDetail | null>(null);
   const [regions, setRegions] = useState<string[]>([]);
@@ -92,6 +95,16 @@ export default function CreateResourceWizard({ templateOverride }: { templateOve
       }
     }).catch((e) => setError(String(e)));
   }, [templateId]);
+
+  useEffect(() => {
+    // group preselection (?group=) + existing group suggestions for the name field
+    const preset = searchParams.get("group");
+    if (preset) setResourceName(preset);
+    api.listMyRequests(100)
+      .then((requests) => setGroupNames([...new Set(requests.map((r) => r.resourceName))]))
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     api.regions(environment).then((r) => {
@@ -270,8 +283,18 @@ export default function CreateResourceWizard({ templateOverride }: { templateOve
             content: (
               <Container>
                 <SpaceBetween size="m">
-                  <FormField label="Resource name" constraintText="Lowercase letters, digits, hyphens; 3–63 chars.">
-                    <Input value={resourceName} onChange={(e) => setResourceName(e.detail.value)} />
+                  <FormField
+                    label="Resource group / name"
+                    description="Pick an existing group to add this resource to it, or type a new name to start one."
+                    constraintText="Lowercase letters, digits, hyphens; 3–63 chars."
+                  >
+                    <Autosuggest
+                      value={resourceName}
+                      onChange={(e) => setResourceName(e.detail.value)}
+                      options={groupNames.map((name) => ({ value: name }))}
+                      placeholder="e.g. pastry-plus"
+                      enteredTextLabel={(text) => `Start new group "${text}"`}
+                    />
                   </FormField>
                   <FormField label="Environment">
                     <Select

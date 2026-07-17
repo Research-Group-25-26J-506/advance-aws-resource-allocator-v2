@@ -99,7 +99,13 @@ export default function CatalogPage() {
                 {
                   id: "actions",
                   content: (t) => (
-                    <Button variant="inline-link" onClick={() => navigate(`/catalog/${t.id}`)}>
+                    <Button
+                      variant="inline-link"
+                      onClick={() => {
+                        const group = searchParams.get("group");
+                        navigate(`/catalog/${t.id}${group ? `?group=${encodeURIComponent(group)}` : ""}`);
+                      }}
+                    >
                       Provision this
                     </Button>
                   ),

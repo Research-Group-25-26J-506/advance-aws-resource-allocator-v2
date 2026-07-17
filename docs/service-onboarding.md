@@ -1,67 +1,84 @@
-# Service onboarding — the PaaStry-mini model (with ECS as a first-class choice)
+# Service onboarding v2 — groups, declared infrastructure, env progression
 
-Modeled on Sysco's PaaStry IDP flow (`.paastry/config.yaml` → Concourse → Harbor → ArgoCD →
-EKS), improved where PaaStry is weakest: **deployment type is a declared choice** — including
-batch/scheduled shapes — and the runtime is **ECS Fargate** (no Kubernetes re-platforming tax).
+Evolution of the PaaStry-mini model. Three pillars: **resource groups** as the unit of an
+application, **declared infrastructure with ensure-exists semantics**, and **environment
+progression defined in config** (non-prod first; PROD hardening next iteration).
 
-## Onboarding = one file in the service repo
+## 1. Resource groups
 
-`.platform/service.yaml`:
+- A group is the application: its services, queues, buckets, DBs — across environments.
+- Provisioning always happens *into* a group (picked or created in wizard Step 1; the group
+  name keys the resources and the env-suffixed physical names).
+- The group page maps every member resource × environment with status, and offers
+  "Provision in this group" so an application grows in place.
+
+## 2. `.platform/service.yaml` v2 — declared infrastructure
 
 ```yaml
-service: list-synchronizer
-team: atlas
+service: orders-api
+group: pastry-plus                # the application this service belongs to
+environments: [dev, qa, stg]     # where this service should exist (promotion order)
+
 deployment:
-  type: scheduled-task        # service | scheduled-task | job (see below)
-  schedule: "rate(6 hours)"   # scheduled-task only
-  cpu: "256"
-  memory: "512"
+  type: service                  # service | scheduled-task | job
+  cpu: "512"
+  memory: "1024"
+  port: 8080
+  healthCheckPath: /healthz
+
+infrastructure:                  # DECLARED dependencies - ensure-exists semantics
+  vpc: default                   # "default" = the platform VPC; or a named vpc resource
+  subnets: private               # private | public (from the VPC's subnet sets)
+  alb:
+    attach: true                 # join the shared ALB
+    path: /orders/*              # listener rule path -> this service's target group
+  logs:
+    destination: s3              # CloudWatch group + subscription/export to the logs bucket
+    retentionDays: 30
+
 build:
-  dockerfile: ./Dockerfile    # or `buildpack: java` once source builds land
-environments: [dev, qa]       # where it auto-provisions; stg/prod via promotion
+  dockerfile: ./Dockerfile
 ```
 
-## Deployment types (PaaStry equivalent → ours)
+### Ensure-exists semantics (the core behavior)
 
-| type | PaaStry shape | Our template | Status |
-| --- | --- | --- | --- |
-| `service` | K8s Deployment (`deployment.type: standard`) | `ecs-service` | ✅ live |
-| `scheduled-task` | K8s CronJob (List Synchronizer shape) | `ecs-scheduled-task` (EventBridge Scheduler → RunTask) | ✅ live |
-| `job` | K8s Job (Asset Transfer shape) | ECS RunTask on demand | 🔜 needs trigger design (same open question PaaStry has: EventBridge event / API call / manual run button on the request page) |
+For each declared dependency the platform resolves in order — **use → create → fail loudly**:
 
-Where PaaStry's onboarding pack "only shows deployment.type: standard" and batch is
-undocumented, here the batch shapes are explicit templates with the same lifecycle as
-everything else: requests, approvals for prod, promotion, audit, env-suffixed names.
+1. **Exists?** Look up via SSM wiring (`/platform/{env}/network/*`, ALB listener, logs bucket).
+   An account typically has ONE VPC and a few public/private subnets — the default. Use them.
+2. **Missing?** Provision it first from the corresponding catalog template (vpc-network,
+   alb-listener-rule, log-forwarding) as a member of the same group, then continue.
+3. Only then create/update the service itself.
 
-## Capability mapping
+VPC/subnets are themselves provisionable (a `vpc-network` template) for accounts that need
+more than the platform default — but the default path never forces anyone to think about
+networking.
 
-| PaaStry capability | Here |
+### Change detection (what an update means)
+
+| What changed in the repo | Platform action |
 | --- | --- |
-| Concourse auto-pipelines (buildpack/Dockerfile, scans) | GitHub Actions: build → Trivy scan → promote tag (`build-images` pattern; per-service repos reuse it as a reusable workflow) |
-| Harbor registry | ECR |
-| ArgoCD + central Helm manifest repo (two-repo model) | Template registry: Git (`templates/`) → validated sync → S3 (immutable versions). The platform repo *is* the manifest repo. |
-| Vault (OIDC) secrets | Secrets Manager (task-def `Secrets`, e.g. DB creds) |
-| Consul config metadata | SSM Parameter Store (`/platform/...`) |
-| Datadog metrics/logs, Traceable | Grafana + Tempo traces + CloudWatch logs (deep-linked per request) |
-| ServiceNow change ticket on prod deploys | PROD approvals inbox (IAM-backed, audited) |
-| Canary rollouts | ECS deployment circuit breaker + rolling; canary via CodeDeploy is a future template option |
-| Fastly Edge WAF | CloudFront (WAF WebACL attachable) |
+| `infrastructure:` / `deployment:` section | CloudFormation update of the affected stacks (infra first, then service) |
+| Application code (anything else) | Build image → scan → push to ECR → new task-def revision → ECS rolls |
+| `environments:` list grew | Provision the service into the newly listed env (promotion applies from the lowest existing env) |
 
-## Onboarding sequence (mini version of the PaaStry guide)
+## 3. Environment progression (non-prod focus this iteration)
 
-1. Service owner adds `.platform/service.yaml` + Dockerfile to their repo.
-2. CI in the service repo builds + scans + pushes the image to ECR (reusable workflow).
-3. Provision through the platform: catalog → ECS Service / Scheduled Task with that image
-   (today manual via the wizard; the discovery step that reads `service.yaml` and opens the
-   request automatically is the next build item, alongside the GitHub App).
-4. Validate in dev (request page: events, logs, traces). Promote dev → qa → stg → prod;
-   prod waits in approvals.
+- The config's `environments:` list *is* the progression definition for that service.
+- Promotion moves the service to the next listed env (same config, env-suffixed names,
+  env-specific wiring resolved per env).
+- **Visualization**: the group page renders each service as a pipeline —
+  `dev ✅ → qa ✅ → stg ⏳ → (prod — next iteration)` — the env chips in chain order are
+  exactly this; upcoming: promote button inline on the chip row, and greyed chips for envs
+  the config declares but that aren't provisioned yet.
+- PROD stays out of scope this iteration; when it lands it inherits the approvals gate and
+  adds the hardening pass (change windows, canary option).
 
-## Open items (deliberately mirrored from the PaaStry migration analysis)
+## Build order for the next iteration
 
-- **Job trigger model** — how on-demand jobs get invoked (EventBridge event, API, run button).
-- **Source-to-image** — GitHub App + CodeBuild so the platform builds repos itself
-  (today the service repo's own CI builds).
-- **Java 8-era workloads** — containerization is the owner's job here too; buildpacks later.
-- **`service.yaml` discovery** — webhook or scheduled scan that turns config changes into
-  platform requests automatically.
+1. `vpc-network` + `alb-attach` + `logs-to-s3` catalog templates (the ensure-exists targets)
+2. Group column on requests (explicit `group` distinct from resource name) + group-aware wizard ✅ (name-keyed version live)
+3. `service.yaml` reader: repo webhook/scan → diff → the change-detection actions above
+4. GitHub App + CodeBuild for the build-image-on-app-change path
+5. Group page pipeline visualization with inline promote
+6. PROD iteration: approvals + canary + change windows
