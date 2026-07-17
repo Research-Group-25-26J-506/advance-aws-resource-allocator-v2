@@ -187,6 +187,7 @@ Resources:
                   s3:
                     bucket: platform-observability-tempo-${AWS::AccountId}-${EnvironmentName}
                     region: ${AWS::Region}
+                    endpoint: s3.${AWS::Region}.amazonaws.com
                   wal: { path: /tmp/tempo/wal }
               compactor:
                 compaction: { block_retention: 720h }
