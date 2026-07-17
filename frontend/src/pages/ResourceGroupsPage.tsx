@@ -90,6 +90,7 @@ export default function ResourceGroupsPage() {
           description="One group per resource name — its resources across every environment. Promote from any environment's request page."
           actions={
             <SpaceBetween direction="horizontal" size="xs">
+              <Button iconName="refresh" onClick={refresh} ariaLabel="Refresh" />
               <Button onClick={() => setCreateVisible(true)}>Create resource group</Button>
               <Button variant="primary" onClick={() => navigate("/catalog")}>
                 Provision a resource

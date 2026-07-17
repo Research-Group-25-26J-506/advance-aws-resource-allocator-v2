@@ -170,15 +170,27 @@ export default function RequestDetailPage() {
         <Header
           variant="h1"
           actions={
+            <SpaceBetween direction="horizontal" size="xs">
+            <Button iconName="refresh" onClick={refresh} ariaLabel="Refresh" />
             <ButtonDropdown
               loading={actionBusy}
               items={[
                 { id: "promote", text: `Promote to ${nextEnv}`, disabled: !promotable },
                 { id: "retry", text: "Retry", disabled: !retryable },
+                {
+                  id: "reconcile",
+                  text: "Re-run (reconcile)",
+                  disabled: !isInProgress(request.status) && request.status !== "QUEUED",
+                },
                 { id: "delete", text: "Delete", disabled: isInProgress(request.status) },
                 { id: "console", text: "View in AWS Console", external: true, disabled: !request.stackId },
               ]}
               onItemClick={(e) => {
+                if (e.detail.id === "reconcile") {
+                  runAction("Re-driven — the pending operation is back in the worker queue", () =>
+                    api.reconcileRequest(request.id).then(setRequest),
+                  );
+                }
                 if (e.detail.id === "promote") {
                   runAction(`Promotion to ${nextEnv} submitted — opening the new request`, async () => {
                     const promoted = await api.promoteRequest(request.id);
@@ -202,6 +214,7 @@ export default function RequestDetailPage() {
             >
               Actions
             </ButtonDropdown>
+            </SpaceBetween>
           }
         >
           Request {request.id.slice(0, 8)}

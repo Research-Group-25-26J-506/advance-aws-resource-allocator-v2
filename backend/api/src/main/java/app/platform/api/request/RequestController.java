@@ -163,6 +163,14 @@ public class RequestController {
                 .body(RequestDto.from(service.retry(auth.getName(), id)));
     }
 
+    @PostMapping("/{id}/reconcile")
+    @PreAuthorize("hasAnyRole('USER','PLATFORM_ADMIN')")
+    public ResponseEntity<RequestDto> reconcile(@PathVariable UUID id, Authentication auth) {
+        return ResponseEntity.accepted()
+                .location(URI.create("/api/v1/requests/" + id))
+                .body(RequestDto.from(service.reconcile(auth.getName(), id)));
+    }
+
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAnyRole('USER','PLATFORM_ADMIN')")
     public ResponseEntity<RequestDto> delete(@PathVariable UUID id, Authentication auth) {

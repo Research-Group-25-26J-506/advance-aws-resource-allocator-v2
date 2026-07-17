@@ -199,6 +199,27 @@ public class RequestService {
         return request;
     }
 
+    /**
+     * Re-drive a stuck in-progress request by re-enqueuing its pending operation. No status
+     * transition — the worker handlers are idempotent on their in-progress status. Recovers
+     * requests whose SQS message was lost (e.g. worker replaced mid-flight during a deploy).
+     */
+    @Transactional
+    public Request reconcile(String actorId, UUID id) {
+        Request request = get(id);
+        switch (request.status()) {
+            case DELETE_IN_PROGRESS -> workQueue.enqueueDelete(id, request.idempotencyKey());
+            case QUEUED, CREATE_IN_PROGRESS -> workQueue.enqueueProvision(id, request.idempotencyKey());
+            default -> throw new app.platform.domain.error.IllegalTransitionException(
+                    id, request.status(), request.status());
+        }
+        requests.appendEvent(id, request.status(), request.status(),
+                "Re-driven by " + actorId + " (reconcile)", "PLATFORM", Instant.now());
+        audit.record(actorId, actorId, "REQUEST_RECONCILED", "REQUEST", id.toString(),
+                Map.of("status", request.status().name()));
+        return request;
+    }
+
     @Transactional
     public Request delete(String actorId, UUID id) {
         Request request = get(id);

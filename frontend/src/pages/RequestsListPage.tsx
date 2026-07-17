@@ -19,9 +19,11 @@ export default function RequestsListPage() {
   const [filter, setFilter] = useState("");
   const [groupFilter, setGroupFilter] = useState("");
 
-  useEffect(() => {
+  const refresh = () => {
+    setRequests(null);
     api.listMyRequests(100).then(setRequests).catch(() => setRequests([]));
-  }, []);
+  };
+  useEffect(refresh, []);
 
   const filtered = (requests ?? []).filter(
     (r) =>
@@ -38,7 +40,12 @@ export default function RequestsListPage() {
         header={
           <Header
             counter={requests ? `(${filtered.length})` : undefined}
-            actions={<Button onClick={() => navigate("/catalog")}>Provision a resource</Button>}
+            actions={
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button iconName="refresh" onClick={refresh} ariaLabel="Refresh" />
+                <Button onClick={() => navigate("/catalog")}>Provision a resource</Button>
+              </SpaceBetween>
+            }
           >
             Requests
           </Header>
