@@ -5,7 +5,8 @@ COPY worker/build/libs/*.jar app.jar
 RUN java -Djarmode=layertools -jar app.jar extract
 
 FROM eclipse-temurin:21-jre
-RUN useradd --system --uid 10001 platform
+# rm pebble: unused Ubuntu service manager in the base image that drags HIGH Go CVEs into scans
+RUN useradd --system --uid 10001 platform && rm -f /usr/bin/pebble
 WORKDIR /app
 COPY --from=extract /app/dependencies/ ./
 COPY --from=extract /app/spring-boot-loader/ ./
