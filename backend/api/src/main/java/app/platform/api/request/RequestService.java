@@ -123,6 +123,39 @@ public class RequestService {
         return requests.listEvents(id);
     }
 
+    /**
+     * Resource promotion: re-provisions the same template + configuration at the next
+     * environment (DEV -> STG -> PROD). PROD promotions park in the approvals inbox like any
+     * other PROD request. The source resource is untouched.
+     */
+    @Transactional
+    public Request promote(String actorId, String actorEmail, UUID sourceId, String idempotencyKey) {
+        Request source = get(sourceId);
+        if (source.status() != RequestStatus.CREATE_COMPLETE && source.status() != RequestStatus.UPDATE_COMPLETE) {
+            throw new app.platform.domain.error.IllegalTransitionException(
+                    sourceId, source.status(), RequestStatus.QUEUED);
+        }
+        Environment next = switch (source.environment()) {
+            case DEV -> Environment.STG;
+            case STG -> Environment.PROD;
+            case PROD -> throw new app.platform.domain.error.NotFoundException(
+                    "Environment above", Environment.PROD);
+        };
+        Request promoted = submit(
+                actorId,
+                actorEmail,
+                source.templateId(),
+                next,
+                source.region(),
+                source.resourceName(),
+                source.formData(),
+                idempotencyKey);
+        audit.record(actorId, actorEmail, "RESOURCE_PROMOTED", "REQUEST", promoted.id().toString(),
+                Map.of("from", source.environment().name(), "to", next.name(),
+                        "sourceRequestId", sourceId.toString()));
+        return promoted;
+    }
+
     @Transactional
     public Request approve(String actorId, UUID id) {
         Request request = get(id);

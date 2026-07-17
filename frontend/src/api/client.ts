@@ -97,6 +97,7 @@ export const api = {
   createRequest: (payload: CreateRequestPayload, idempotencyKey: string) =>
     call<PlatformRequest>("POST", "/requests", payload, idempotencyKey),
   retryRequest: (id: string) => call<PlatformRequest>("POST", `/requests/${id}/retry`, undefined, uuidv7()),
+  promoteRequest: (id: string) => call<PlatformRequest>("POST", `/requests/${id}/promote`, undefined, uuidv7()),
   deleteRequest: (id: string) => call<PlatformRequest>("DELETE", `/requests/${id}`, undefined, uuidv7()),
 };
 

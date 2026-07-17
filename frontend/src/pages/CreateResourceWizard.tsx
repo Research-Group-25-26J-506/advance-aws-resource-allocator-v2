@@ -43,8 +43,9 @@ interface FormSchema {
  * Idempotency-Key (UUIDv7) is generated once per mount so retries reuse the same key. Drafts
  * persist to sessionStorage keyed by templateId@version.
  */
-export default function CreateResourceWizard() {
-  const { templateId } = useParams<{ templateId: string }>();
+export default function CreateResourceWizard({ templateOverride }: { templateOverride?: string } = {}) {
+  const { templateId: templateParam } = useParams<{ templateId: string }>();
+  const templateId = templateOverride ?? templateParam;
   const navigate = useNavigate();
 
   const [detail, setDetail] = useState<TemplateDetail | null>(null);

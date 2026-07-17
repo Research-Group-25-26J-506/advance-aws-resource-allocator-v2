@@ -172,7 +172,8 @@ export default function App() {
                   </RequireRole>
                 }
               />
-              <Route path="/deployments" element={<ComingSoon title="ECS deployments (2.06 — phase 3)" />} />
+              {/* Deployments = provisioning an ecs-service; source-to-image builds come with the GitHub App */}
+              <Route path="/deployments" element={<CreateResourceWizard templateOverride="ecs-service" />} />
               <Route path="/runbooks" element={<RunbooksPage />} />
               <Route
                 path="/audit"
@@ -188,15 +189,6 @@ export default function App() {
         }
       />
     </MeContext.Provider>
-  );
-}
-
-function ComingSoon({ title }: { title: string }) {
-  return (
-    <Box textAlign="center" padding="xxl" color="text-status-inactive">
-      <b>{title}</b>
-      <Box variant="p">This screen lands in a later phase of the implementation checklist (9.2).</Box>
-    </Box>
   );
 }
 

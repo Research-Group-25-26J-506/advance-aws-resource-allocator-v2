@@ -129,6 +129,18 @@ public class RequestController {
         return emitter;
     }
 
+    @PostMapping("/{id}/promote")
+    @PreAuthorize("hasAnyRole('USER','PLATFORM_ADMIN')")
+    public ResponseEntity<RequestDto> promote(
+            @PathVariable UUID id,
+            @RequestHeader("Idempotency-Key") String idempotencyKey,
+            Authentication auth) {
+        var promoted = service.promote(auth.getName(), auth.getName(), id, idempotencyKey);
+        return ResponseEntity.accepted()
+                .location(URI.create("/api/v1/requests/" + promoted.id()))
+                .body(RequestDto.from(promoted));
+    }
+
     @PostMapping("/{id}/retry")
     @PreAuthorize("hasAnyRole('USER','PLATFORM_ADMIN')")
     public ResponseEntity<RequestDto> retry(@PathVariable UUID id, Authentication auth) {

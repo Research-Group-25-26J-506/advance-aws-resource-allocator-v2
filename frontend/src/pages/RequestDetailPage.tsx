@@ -117,6 +117,10 @@ export default function RequestDetailPage() {
   }
 
   const failed = request.status.endsWith("_FAILED") || request.status === "FAILED_VALIDATION";
+  const promotable =
+    (request.status === "CREATE_COMPLETE" || request.status === "UPDATE_COMPLETE") &&
+    request.environment !== "PROD";
+  const nextEnv = request.environment === "DEV" ? "STG" : "PROD";
   const activeTab = searchParams.get("tab") ?? "overview";
 
   return (
@@ -128,11 +132,18 @@ export default function RequestDetailPage() {
             <ButtonDropdown
               loading={actionBusy}
               items={[
+                { id: "promote", text: `Promote to ${nextEnv}`, disabled: !promotable },
                 { id: "retry", text: "Retry", disabled: !failed },
                 { id: "delete", text: "Delete", disabled: isInProgress(request.status) },
                 { id: "console", text: "View in AWS Console", external: true, disabled: !request.stackId },
               ]}
               onItemClick={(e) => {
+                if (e.detail.id === "promote") {
+                  runAction(`Promotion to ${nextEnv} submitted — opening the new request`, async () => {
+                    const promoted = await api.promoteRequest(request.id);
+                    window.location.href = `/requests/${promoted.id}`;
+                  });
+                }
                 if (e.detail.id === "retry") {
                   runAction("Retry queued — the request is back in the worker queue", () =>
                     api.retryRequest(request.id).then(setRequest),
