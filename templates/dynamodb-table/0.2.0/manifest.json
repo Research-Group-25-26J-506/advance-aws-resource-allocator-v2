@@ -1,0 +1,40 @@
+{
+  "manifestSchemaVersion": 1,
+  "templateId": "dynamodb-table",
+  "version": "0.2.0",
+  "category": "Database",
+  "displayName": "DynamoDB Table",
+  "description": "On-demand DynamoDB table with SSE, optional sort key, TTL, and point-in-time recovery.",
+  "renderMode": "parameter",
+  "parameterMap": {
+    "tableName": "TableName",
+    "partitionKeyName": "PartitionKeyName",
+    "partitionKeyType": "PartitionKeyType",
+    "sortKeyName": "SortKeyName",
+    "sortKeyType": "SortKeyType",
+    "pitrEnabled": "PitrEnabled",
+    "ttlAttribute": "TtlAttribute"
+  },
+  "maturity": "beta",
+  "owners": [
+    "platform-team"
+  ],
+  "defaultsByEnv": {
+    "prod": {
+      "pitrEnabled": true
+    }
+  },
+  "estimatedMonthlyCost": "~$1.25/M writes + $0.25/M reads (on-demand)",
+  "cfnCapabilities": [],
+  "examples": [
+    {
+      "tableName": "user-sessions",
+      "partitionKeyName": "user_id",
+      "partitionKeyType": "S",
+      "sortKeyName": "session_id",
+      "sortKeyType": "S",
+      "pitrEnabled": true,
+      "ttlAttribute": "expires_at"
+    }
+  ]
+}

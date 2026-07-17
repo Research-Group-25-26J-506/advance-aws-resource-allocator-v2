@@ -21,12 +21,16 @@ public class ConfigController {
     @Value("${platform.auth.domain:${PLATFORM_COGNITO_DOMAIN:}}")
     private String cognitoDomain;
 
+    @Value("${platform.environments:${PLATFORM_ENVIRONMENTS:DEV,QA,STG,PROD}}")
+    private String environments;
+
     @GetMapping("/api/v1/config")
     public Map<String, String> config() {
         return Map.of(
                 "authMode", issuer.isBlank() ? "dev-bypass" : "cognito",
                 "issuer", issuer,
                 "clientId", webClientId,
-                "cognitoDomain", cognitoDomain);
+                "cognitoDomain", cognitoDomain,
+                "environments", environments);
     }
 }

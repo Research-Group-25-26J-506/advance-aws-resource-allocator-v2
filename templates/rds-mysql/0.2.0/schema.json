@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RDS MySQL",
+  "type": "object",
+  "required": ["dbIdentifier"],
+  "additionalProperties": false,
+  "properties": {
+    "dbIdentifier": {
+      "type": "string",
+      "title": "Instance identifier",
+      "pattern": "^[a-z][a-z0-9-]{0,62}$"
+    },
+    "instanceClass": {
+      "type": "string",
+      "title": "Instance class",
+      "enum": ["db.t4g.micro", "db.t4g.small", "db.t4g.medium"],
+      "default": "db.t4g.micro",
+      "x-help": "micro ~$12/mo, small ~$24/mo, medium ~$47/mo (single-AZ, on-demand)."
+    },
+    "allocatedStorageGb": {
+      "type": "integer",
+      "title": "Storage (GB)",
+      "minimum": 20,
+      "maximum": 1000,
+      "default": 20
+    },
+    "databaseName": {
+      "type": "string",
+      "title": "Initial database name",
+      "pattern": "^[a-zA-Z][a-zA-Z0-9_]{0,63}$",
+      "default": "app"
+    },
+    "multiAz": {
+      "type": "boolean",
+      "title": "Multi-AZ",
+      "default": false,
+      "x-help": "Doubles the cost; required posture for PROD."
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "manifestSchemaVersion": 1,
+  "templateId": "sqs-queue",
+  "version": "0.2.0",
+  "category": "Integration",
+  "displayName": "SQS Queue",
+  "description": "Standard SQS queue with SSE encryption and an optional dead-letter queue with redrive policy.",
+  "renderMode": "parameter",
+  "parameterMap": {
+    "queueName": "QueueName",
+    "visibilityTimeoutSeconds": "VisibilityTimeoutSeconds",
+    "messageRetentionDays": "MessageRetentionDays",
+    "withDlq": "WithDlq",
+    "maxReceiveCount": "MaxReceiveCount"
+  },
+  "maturity": "beta",
+  "owners": [
+    "platform-team"
+  ],
+  "defaultsByEnv": {
+    "dev": {
+      "messageRetentionDays": "4"
+    },
+    "prod": {
+      "withDlq": true
+    }
+  },
+  "estimatedMonthlyCost": "~$0 under 1M requests (free tier), then $0.40/M",
+  "cfnCapabilities": [],
+  "examples": [
+    {
+      "queueName": "orders-events",
+      "visibilityTimeoutSeconds": 60,
+      "messageRetentionDays": "7",
+      "withDlq": true,
+      "maxReceiveCount": 5
+    }
+  ]
+}

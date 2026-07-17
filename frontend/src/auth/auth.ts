@@ -12,9 +12,15 @@ interface RuntimeConfig {
   issuer: string;
   clientId: string;
   cognitoDomain: string;
+  environments?: string;
 }
 
 let config: RuntimeConfig = { authMode: "dev-bypass", issuer: "", clientId: "", cognitoDomain: "" };
+
+/** Ordered environment chain, SSM-configured server-side (e.g. "DEV,QA,STG,PROD"). */
+export function platformEnvironments(): string[] {
+  return (config.environments ?? "DEV,QA,STG,PROD").split(",").map((e) => e.trim());
+}
 let manager: UserManager | null = null;
 let currentUser: User | null = null;
 let initPromise: Promise<AuthMode> | null = null;

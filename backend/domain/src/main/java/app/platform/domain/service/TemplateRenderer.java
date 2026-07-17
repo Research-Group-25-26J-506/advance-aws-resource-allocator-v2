@@ -32,7 +32,8 @@ public class TemplateRenderer {
         Map<String, Object> withDefaults = applyDefaults(manifest, formData);
         return switch (manifest.renderMode()) {
             case PARAMETER -> new RenderResult(cfnBody, mapParameters(manifest, withDefaults));
-            case JINJA -> new RenderResult(bodyTemplater.render(cfnBody, withDefaults), Map.of());
+            // mutable map: the worker injects platform parameters (Environment) post-render
+            case JINJA -> new RenderResult(bodyTemplater.render(cfnBody, withDefaults), new LinkedHashMap<>());
         };
     }
 
