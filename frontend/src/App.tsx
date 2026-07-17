@@ -26,6 +26,7 @@ const ApprovalsPage = lazy(() => import("./pages/ApprovalsPage"));
 const AuditLogPage = lazy(() => import("./pages/AuditLogPage"));
 const RunbooksPage = lazy(() => import("./pages/RunbooksPage"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
+const ResourceGroupsPage = lazy(() => import("./pages/ResourceGroupsPage"));
 const TemplatesAdminPage = lazy(() => import("./pages/TemplatesAdminPage"));
 
 export default function App() {
@@ -59,6 +60,7 @@ export default function App() {
   const navItems: SideNavigationProps.Item[] = [
     { type: "link", text: "Dashboard", href: "/" },
     { type: "link", text: "Catalog", href: "/catalog" },
+    { type: "link", text: "Resources", href: "/resources" },
     { type: "link", text: "My Requests", href: "/requests" },
     { type: "link", text: "Deployments", href: "/deployments" },
     ...(hasRole(me, "APPROVER")
@@ -146,6 +148,7 @@ export default function App() {
               <Route path="/" element={<DashboardPage />} />
               <Route path="/catalog" element={<CatalogPage />} />
               <Route path="/catalog/:templateId" element={<CreateResourceWizard />} />
+              <Route path="/resources" element={<ResourceGroupsPage />} />
               <Route path="/requests" element={<RequestsListPage />} />
               <Route path="/requests/:id" element={<RequestDetailPage />} />
               <Route
