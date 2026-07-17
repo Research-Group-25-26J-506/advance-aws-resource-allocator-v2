@@ -79,6 +79,9 @@ export const api = {
   listTemplates: () => call<Template[]>("GET", "/templates?maturity=stable,beta"),
   getTemplate: (id: string) => call<TemplateDetail>("GET", `/templates/${id}`),
 
+  listGroups: () => call<{ name: string; description: string }[]>("GET", "/groups"),
+  createGroup: (name: string, description: string) =>
+    call<{ name: string }>("POST", "/groups", { name, description }, uuidv7()),
   listAudit: () => call<AuditEntry[]>("GET", "/audit"),
   listRunbooks: () => call<Runbook[]>("GET", "/runbooks"),
   listApprovals: () => call<PendingApproval[]>("GET", "/approvals"),

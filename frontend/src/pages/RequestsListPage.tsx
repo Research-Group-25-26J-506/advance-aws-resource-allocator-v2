@@ -4,6 +4,7 @@ import Box from "@cloudscape-design/components/box";
 import Button from "@cloudscape-design/components/button";
 import ContentLayout from "@cloudscape-design/components/content-layout";
 import Header from "@cloudscape-design/components/header";
+import Select from "@cloudscape-design/components/select";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import Table from "@cloudscape-design/components/table";
 import TextFilter from "@cloudscape-design/components/text-filter";
@@ -16,6 +17,7 @@ export default function RequestsListPage() {
   const navigate = useNavigate();
   const [requests, setRequests] = useState<PlatformRequest[] | null>(null);
   const [filter, setFilter] = useState("");
+  const [groupFilter, setGroupFilter] = useState("");
 
   useEffect(() => {
     api.listMyRequests(100).then(setRequests).catch(() => setRequests([]));
@@ -23,10 +25,11 @@ export default function RequestsListPage() {
 
   const filtered = (requests ?? []).filter(
     (r) =>
-      filter === "" ||
-      r.resourceName.includes(filter) ||
-      r.templateId.includes(filter) ||
-      r.status.toLowerCase().includes(filter.toLowerCase()),
+      (groupFilter === "" || r.resourceName === groupFilter) &&
+      (filter === "" ||
+        r.resourceName.includes(filter) ||
+        r.templateId.includes(filter) ||
+        r.status.toLowerCase().includes(filter.toLowerCase())),
   );
 
   return (
@@ -41,11 +44,21 @@ export default function RequestsListPage() {
           </Header>
         }
         filter={
-          <TextFilter
-            filteringText={filter}
-            filteringPlaceholder="Filter by resource, template, or status"
-            onChange={(e) => setFilter(e.detail.filteringText)}
-          />
+          <SpaceBetween direction="horizontal" size="s">
+            <Select
+              selectedOption={groupFilter ? { value: groupFilter, label: groupFilter } : { value: "", label: "All groups" }}
+              options={[
+                { value: "", label: "All groups" },
+                ...[...new Set((requests ?? []).map((r) => r.resourceName))].map((g) => ({ value: g, label: g })),
+              ]}
+              onChange={(e) => setGroupFilter(e.detail.selectedOption.value ?? "")}
+            />
+            <TextFilter
+              filteringText={filter}
+              filteringPlaceholder="Filter by resource, template, or status"
+              onChange={(e) => setFilter(e.detail.filteringText)}
+            />
+          </SpaceBetween>
         }
         loading={requests === null}
         items={filtered}
