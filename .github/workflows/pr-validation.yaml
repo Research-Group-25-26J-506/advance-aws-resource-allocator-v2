@@ -64,7 +64,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@d156388eb19639ec20ade50009f3d199ce1e2808 # v4.1.0
       - name: Build + unit tests + ArchUnit
         working-directory: backend
-        run: gradle build -x integrationTest --no-daemon
+        # (-x integrationTest returns once a Testcontainers task of that name exists — 7.03/8.02)
+        run: gradle build --no-daemon
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
