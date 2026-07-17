@@ -221,7 +221,10 @@ Resources:
               - Sid: CloudFormation
                 Effect: Allow
                 Action: [cloudformation:*]
-                Resource: !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/platform-*
+                Resource:
+                  - !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/platform-*
+                  # templates using macros need CreateChangeSet on the transform itself
+                  - arn:aws:cloudformation:*:aws:transform/SecretsManager-2020-07-23
               - Sid: PassExecRoles
                 Effect: Allow
                 Action: iam:PassRole
