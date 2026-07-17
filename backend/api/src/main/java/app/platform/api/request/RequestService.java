@@ -59,10 +59,12 @@ public class RequestService {
                 .findLatestPublished(templateId)
                 .orElseThrow(() -> new NotFoundException("Published template", templateId));
 
-        // TODO(phase-2): resolve the requester's team from the user directory (custom:team_id claim)
+        // TODO(later): resolve the requester's team from the user directory (custom:team_id claim).
+        // Until then: get-or-create a default team so a fresh environment can take requests.
         UUID teamId = teams.findAll().stream()
                 .findFirst()
-                .orElseThrow(() -> new IllegalStateException("no teams seeded"))
+                .orElseGet(() -> teams.save(new app.platform.persistence.entity.TeamEntity(
+                        UuidV7.generate(), "default", "UNSET")))
                 .getId();
 
         Instant now = Instant.now();
