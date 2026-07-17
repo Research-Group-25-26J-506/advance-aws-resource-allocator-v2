@@ -116,6 +116,38 @@ export default function RequestDetailPage() {
     );
   }
 
+  // Deep-linked Grafana Explore views (2.14b): Tempo trace search scoped to the platform
+  // services; CloudWatch Logs Insights filtered to this request_id.
+  const traceUrl =
+    "/grafana/explore?left=" +
+    encodeURIComponent(
+      JSON.stringify({
+        datasource: "tempo",
+        queries: [{ refId: "A", queryType: "traceqlSearch", limit: 20, filters: [] }],
+        range: { from: "now-3h", to: "now" },
+      }),
+    );
+  const logsUrl =
+    "/grafana/explore?left=" +
+    encodeURIComponent(
+      JSON.stringify({
+        datasource: "cloudwatch",
+        queries: [
+          {
+            refId: "A",
+            queryMode: "Logs",
+            region: "default",
+            expression: `fields @timestamp, message, level | filter request_id = "${request.id}" or @message like "${request.id.slice(0, 8)}" | sort @timestamp desc | limit 100`,
+            logGroups: [
+              { arn: "arn:aws:logs:us-east-1:194418667229:log-group:/platform/dev/api:*", name: "/platform/dev/api" },
+              { arn: "arn:aws:logs:us-east-1:194418667229:log-group:/platform/dev/worker:*", name: "/platform/dev/worker" },
+            ],
+          },
+        ],
+        range: { from: "now-3h", to: "now" },
+      }),
+    );
+
   const failed = request.status.endsWith("_FAILED") || request.status === "FAILED_VALIDATION";
   const promotable =
     (request.status === "CREATE_COMPLETE" || request.status === "UPDATE_COMPLETE") &&
@@ -287,12 +319,12 @@ export default function RequestDetailPage() {
               label: "Logs",
               content: (
                 <SpaceBetween size="s">
-                  <Button href="/grafana/explore" target="_blank" iconAlign="right" iconName="external">
-                    Open Grafana Explore (filter request_id: {request.id.slice(0, 8)}…)
+                  <Button href={logsUrl} target="_blank" iconAlign="right" iconName="external">
+                    Open logs for this request (CloudWatch Logs Insights)
                   </Button>
                   <iframe
                     title="Grafana logs"
-                    src="/grafana/explore"
+                    src={logsUrl}
                     style={{ width: "100%", height: 480, border: "1px solid #333", borderRadius: 8 }}
                   />
                 </SpaceBetween>
@@ -303,12 +335,12 @@ export default function RequestDetailPage() {
               label: "Trace",
               content: (
                 <SpaceBetween size="s">
-                  <Button href="/grafana/explore" target="_blank" iconAlign="right" iconName="external">
-                    Open Tempo trace search
+                  <Button href={traceUrl} target="_blank" iconAlign="right" iconName="external">
+                    Open Tempo trace search (last 3h)
                   </Button>
                   <iframe
                     title="Grafana traces"
-                    src="/grafana/explore"
+                    src={traceUrl}
                     style={{ width: "100%", height: 480, border: "1px solid #333", borderRadius: 8 }}
                   />
                 </SpaceBetween>
