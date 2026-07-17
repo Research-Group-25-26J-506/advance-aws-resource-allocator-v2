@@ -150,6 +150,9 @@ export default function RequestDetailPage() {
     );
 
   const failed = request.status.endsWith("_FAILED") || request.status === "FAILED_VALIDATION";
+  // ROLLBACK_COMPLETE is retryable too: the lifecycle allows -> QUEUED, and the worker clears
+  // the dead rolled-back stack before re-creating.
+  const retryable = failed || request.status === "ROLLBACK_COMPLETE";
   const envChain = platformEnvironments();
   const envIndex = envChain.indexOf(request.environment);
   const promotable =
@@ -169,7 +172,7 @@ export default function RequestDetailPage() {
               loading={actionBusy}
               items={[
                 { id: "promote", text: `Promote to ${nextEnv}`, disabled: !promotable },
-                { id: "retry", text: "Retry", disabled: !failed },
+                { id: "retry", text: "Retry", disabled: !retryable },
                 { id: "delete", text: "Delete", disabled: isInProgress(request.status) },
                 { id: "console", text: "View in AWS Console", external: true, disabled: !request.stackId },
               ]}

@@ -33,6 +33,7 @@ public class CfnStackLauncher implements StackLauncher {
     @Override
     public String createStack(StackLaunch launch) {
         CloudFormationClient cfn = clientFor(launch.executionRoleArn(), launch.region(), launch.clientRequestToken());
+        clearRolledBackStack(cfn, launch.stackName());
         CreateStackRequest.Builder builder = CreateStackRequest.builder()
                 .stackName(launch.stackName())
                 .clientRequestToken(launch.clientRequestToken())
@@ -61,6 +62,24 @@ public class CfnStackLauncher implements StackLauncher {
     public void deleteStack(String stackId, String executionRoleArn, app.platform.domain.model.Environment env,
             String region) {
         clientFor(executionRoleArn, region, null).deleteStack(b -> b.stackName(stackId));
+    }
+
+    /**
+     * A stack whose CREATE rolled back holds no resources but blocks re-creation under the same
+     * name. On retry, delete it first so CreateStack can proceed.
+     */
+    private void clearRolledBackStack(CloudFormationClient cfn, String stackName) {
+        try {
+            var stacks = cfn.describeStacks(b -> b.stackName(stackName)).stacks();
+            if (!stacks.isEmpty()
+                    && stacks.get(0).stackStatus()
+                            == software.amazon.awssdk.services.cloudformation.model.StackStatus.ROLLBACK_COMPLETE) {
+                cfn.deleteStack(b -> b.stackName(stackName));
+                cfn.waiter().waitUntilStackDeleteComplete(b -> b.stackName(stackName));
+            }
+        } catch (software.amazon.awssdk.services.cloudformation.model.CloudFormationException e) {
+            // stack not found — nothing to clear
+        }
     }
 
     private CloudFormationClient clientFor(String executionRoleArn, String region, String sessionSuffix) {
