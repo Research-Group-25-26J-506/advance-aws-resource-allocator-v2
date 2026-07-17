@@ -1,0 +1,29 @@
+{
+  "manifestSchemaVersion": 1,
+  "templateId": "ecs-service",
+  "version": "0.3.0",
+  "category": "Compute",
+  "displayName": "ECS Service",
+  "description": "Deploy a container image as a Fargate service on the platform cluster. Optionally attach to the shared ALB on a path (reachable at the platform URL) and forward logs to S3.",
+  "renderMode": "parameter",
+  "parameterMap": {
+    "serviceName": "ServiceName",
+    "image": "Image",
+    "containerPort": "ContainerPort",
+    "cpu": "Cpu",
+    "memory": "Memory",
+    "desiredCount": "DesiredCount",
+    "attachAlb": "AttachAlb",
+    "albPath": "AlbPath",
+    "albPriority": "AlbPriority",
+    "healthCheckPath": "HealthCheckPath",
+    "forwardLogsToS3": "ForwardLogsToS3"
+  },
+  "maturity": "beta",
+  "owners": ["platform-team"],
+  "estimatedMonthlyCost": "~$9/mo per always-on 0.25vCPU/512MB task; +Firehose if log forwarding on",
+  "cfnCapabilities": ["CAPABILITY_NAMED_IAM"],
+  "examples": [
+    { "serviceName": "orders-api", "image": "public.ecr.aws/nginx/nginx:1.27-alpine", "containerPort": 80, "cpu": "256", "memory": "512", "desiredCount": 1, "attachAlb": true, "albPath": "/orders/*", "albPriority": 200, "healthCheckPath": "/", "forwardLogsToS3": false }
+  ]
+}
