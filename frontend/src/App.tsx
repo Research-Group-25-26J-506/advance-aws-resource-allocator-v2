@@ -31,6 +31,7 @@ const TopologyPage = lazy(() => import("./pages/TopologyPage"));
 const ServiceLogsPage = lazy(() => import("./pages/ServiceLogsPage"));
 const BuildsPage = lazy(() => import("./pages/BuildsPage"));
 const TemplatesAdminPage = lazy(() => import("./pages/TemplatesAdminPage"));
+const OperationsPage = lazy(() => import("./pages/OperationsPage"));
 
 export default function App() {
   const [me, setMe] = useState<Me | null>(null);
@@ -77,6 +78,9 @@ export default function App() {
           { type: "link", text: "Templates", href: "/admin/templates" } satisfies SideNavigationProps.Item,
           { type: "link", text: "Sync history", href: "/admin/sync" } satisfies SideNavigationProps.Item,
         ]
+      : []),
+    ...(hasRole(me, "PLATFORM_ADMIN")
+      ? [{ type: "link", text: "Operations", href: "/operations" } satisfies SideNavigationProps.Item]
       : []),
     { type: "divider" },
     { type: "link", text: "Observability (Grafana)", href: "https://grafana.example.internal", external: true },
@@ -192,6 +196,14 @@ export default function App() {
                 element={
                   <RequireRole roles={["PLATFORM_ADMIN", "APPROVER"]}>
                     <AuditLogPage />
+                  </RequireRole>
+                }
+              />
+              <Route
+                path="/operations"
+                element={
+                  <RequireRole roles={["PLATFORM_ADMIN"]}>
+                    <OperationsPage />
                   </RequireRole>
                 }
               />

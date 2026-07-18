@@ -134,3 +134,24 @@ export interface CreateRequestPayload {
   description?: string;
   configuration: Record<string, unknown>;
 }
+
+export interface DlqMoveTask {
+  status: string; // NONE | RUNNING | COMPLETED | CANCELLING | CANCELLED | FAILED
+  moved?: number;
+  toMove?: number;
+  failureReason?: string;
+}
+
+export interface DlqSummary {
+  configured: boolean;
+  visible: number;
+  notVisible: number;
+  redrive?: DlqMoveTask;
+}
+
+export interface DlqMessage {
+  messageId: string;
+  receiveCount: string;
+  firstSentAt: string;
+  body: string;
+}

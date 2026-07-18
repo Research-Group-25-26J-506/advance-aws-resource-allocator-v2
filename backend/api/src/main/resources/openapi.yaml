@@ -18,6 +18,7 @@ tags:
   - name: requests
   - name: templates
   - name: admin-sync
+  - name: admin
   - name: approvals
   - name: misc
 
@@ -265,6 +266,75 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/TemplateSync" }
         "404": { $ref: "#/components/responses/Problem" }
+
+  /admin/dlq:
+    get:
+      tags: [admin]
+      operationId: dlqSummary
+      summary: Dead-letter queue depth + last redrive task (PLATFORM_ADMIN)
+      responses:
+        "200":
+          description: DLQ summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  configured: { type: boolean }
+                  visible: { type: integer }
+                  notVisible: { type: integer }
+                  redrive:
+                    type: object
+                    properties:
+                      status: { type: string }
+                      moved: { type: [integer, "null"] }
+                      toMove: { type: [integer, "null"] }
+                      failureReason: { type: [string, "null"] }
+
+  /admin/dlq/messages:
+    get:
+      tags: [admin]
+      operationId: dlqMessages
+      summary: Peek up to 10 stuck messages, non-destructively (PLATFORM_ADMIN)
+      responses:
+        "200":
+          description: Sample of dead-lettered messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    messageId: { type: string }
+                    receiveCount: { type: string }
+                    firstSentAt: { type: string }
+                    body: { type: string }
+
+  /admin/dlq/redrive:
+    post:
+      tags: [admin]
+      operationId: dlqRedrive
+      summary: Redrive all dead-lettered messages back to the source queue (PLATFORM_ADMIN)
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                maxMessagesPerSecond: { type: [integer, "null"] }
+      responses:
+        "202":
+          description: Message-move task started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  taskHandle: { type: string }
 
   /approvals:
     get:

@@ -143,6 +143,17 @@ export async function mockHandler(method: string, path: string, body?: unknown):
     const id = path.split("/")[2];
     return requests.find((r) => r.id === id) ?? requests[0];
   }
+  if (method === "POST" && path === "/admin/dlq/redrive") return { taskHandle: "mock-move-task" };
+  if (path === "/admin/dlq/messages")
+    return [
+      {
+        messageId: "m-1",
+        receiveCount: "5",
+        firstSentAt: String(Date.now() - 3_600_000),
+        body: '{"requestId":"018f...","type":"PROVISION"}',
+      },
+    ];
+  if (path === "/admin/dlq") return { configured: true, visible: 1, notVisible: 0, redrive: { status: "NONE" } };
   if (path.startsWith("/requests")) return requests;
   throw new Error(`No mock for ${method} ${path}`);
 }

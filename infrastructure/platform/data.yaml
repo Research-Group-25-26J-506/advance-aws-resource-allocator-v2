@@ -234,6 +234,18 @@ Resources:
       Name: !Sub /platform/${EnvironmentName}/sqs/requests-queue-arn
       Type: String
       Value: !GetAtt RequestsQueue.Arn
+  SsmRequestsDlqUrl:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/sqs/requests-dlq-url
+      Type: String
+      Value: !Ref RequestsDlq
+  SsmRequestsDlqArn:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/sqs/requests-dlq-arn
+      Type: String
+      Value: !GetAtt RequestsDlq.Arn
   SsmIdempotencyTable:
     Type: AWS::SSM::Parameter
     Properties:
