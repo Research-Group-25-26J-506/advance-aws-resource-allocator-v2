@@ -18,7 +18,7 @@ import SpaceBetween from "@cloudscape-design/components/space-between";
 import Spinner from "@cloudscape-design/components/spinner";
 import Tabs from "@cloudscape-design/components/tabs";
 import { api } from "../api/client";
-import type { PlatformRequest, RequestEvent } from "../api/types";
+import type { PlatformRequest, RequestEvent, ResourceCost } from "../api/types";
 import PlatformStatus, { isInProgress, isTerminal } from "../components/PlatformStatus";
 import { platformEnvironments } from "../auth/auth";
 import { localWithUtcTitle } from "../util/time";
@@ -33,6 +33,7 @@ export default function RequestDetailPage() {
   const [request, setRequest] = useState<PlatformRequest | null>(null);
   const [events, setEvents] = useState<RequestEvent[]>([]);
   const [outputs, setOutputs] = useState<{ key: string; value: string }[]>([]);
+  const [cost, setCost] = useState<ResourceCost | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleteVisible, setDeleteVisible] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
@@ -73,6 +74,12 @@ export default function RequestDetailPage() {
     api.getRequest(id).then(setRequest).catch((e) => setError(String(e)));
     api.getRequestEvents(id).then(setEvents).catch(() => undefined);
     api.getRequestOutputs(id).then(setOutputs).catch(() => undefined);
+  }, [id]);
+
+  // Per-resource spend is stable and Cost-Explorer-cached; fetch once per request (not on poll).
+  useEffect(() => {
+    if (!id) return;
+    api.costForResource(id).then(setCost).catch(() => setCost(null));
   }, [id]);
 
   // SSE preferred; fall back to 5s polling while in progress (stop on terminal state)
@@ -266,6 +273,15 @@ export default function RequestDetailPage() {
             <Box variant="awsui-key-label">Owner</Box>
             <Box>{request.requesterEmail}</Box>
           </div>
+          {cost?.available && (
+            <div>
+              <Box variant="awsui-key-label">Month-to-date cost</Box>
+              <Box fontWeight="bold">{money(cost.monthToDate, cost.currency)}</Box>
+              <Box color="text-status-inactive" fontSize="body-s">
+                via PlatformRequestId tag
+              </Box>
+            </div>
+          )}
         </ColumnLayout>
 
         <Container>
@@ -417,4 +433,8 @@ export default function RequestDetailPage() {
       </Modal>
     </ContentLayout>
   );
+}
+
+function money(n: number, currency = "USD"): string {
+  return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(n);
 }

@@ -155,3 +155,30 @@ export interface DlqMessage {
   firstSentAt: string;
   body: string;
 }
+
+export interface CostSummary {
+  available: boolean;
+  currency: string;
+  monthToDate: number;
+  previousMonth: number;
+  trend: { month: string; amount: number }[];
+  updatedAt: string;
+  note?: string | null;
+}
+
+export interface CostTeamSlice {
+  costCenter: string;
+  team: string;
+  amount: number;
+}
+
+export interface CostEnvSlice {
+  key: string;
+  amount: number;
+}
+
+export interface ResourceCost {
+  available: boolean;
+  currency: string;
+  monthToDate: number;
+}

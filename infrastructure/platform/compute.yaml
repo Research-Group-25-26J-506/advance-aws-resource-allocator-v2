@@ -223,6 +223,12 @@ Resources:
                 Effect: Allow
                 Action: [codebuild:StartBuild, codebuild:BatchGetBuilds]
                 Resource: !Sub arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/platform-${EnvironmentName}-image-builder
+              - Sid: CostExplorerRead
+                # Cost visibility (governance-by-visibility): read-only Cost Explorer. CE has no
+                # resource-level scoping, so Resource must be "*"; all actions are read-only.
+                Effect: Allow
+                Action: [ce:GetCostAndUsage, ce:GetCostForecast, ce:GetDimensionValues, ce:GetTags]
+                Resource: "*"
 
   WorkerTaskRole:
     Type: AWS::IAM::Role

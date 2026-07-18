@@ -154,6 +154,37 @@ export async function mockHandler(method: string, path: string, body?: unknown):
       },
     ];
   if (path === "/admin/dlq") return { configured: true, visible: 1, notVisible: 0, redrive: { status: "NONE" } };
+  if (path === "/costs/summary")
+    return {
+      available: true,
+      currency: "USD",
+      monthToDate: 412.87,
+      previousMonth: 638.19,
+      trend: [
+        { month: "2026-02", amount: 501.2 },
+        { month: "2026-03", amount: 548.9 },
+        { month: "2026-04", amount: 602.4 },
+        { month: "2026-05", amount: 571.05 },
+        { month: "2026-06", amount: 638.19 },
+        { month: "2026-07", amount: 412.87 },
+      ],
+      updatedAt: new Date().toISOString(),
+      note: null,
+    };
+  if (path === "/costs/by-team")
+    return [
+      { costCenter: "CC-1001", team: "Payments", amount: 221.4 },
+      { costCenter: "CC-2050", team: "Research", amount: 131.02 },
+      { costCenter: "CC-3007", team: "Platform", amount: 60.45 },
+    ];
+  if (path === "/costs/by-environment")
+    return [
+      { key: "PROD", amount: 254.11 },
+      { key: "STG", amount: 88.3 },
+      { key: "QA", amount: 41.2 },
+      { key: "DEV", amount: 29.26 },
+    ];
+  if (path.startsWith("/costs/resource/")) return { available: true, currency: "USD", monthToDate: 18.44 };
   if (path.startsWith("/requests")) return requests;
   throw new Error(`No mock for ${method} ${path}`);
 }
