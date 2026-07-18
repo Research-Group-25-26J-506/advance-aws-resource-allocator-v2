@@ -48,6 +48,9 @@ otel:
   exporter:
     otlp:
       endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4317}
+      # The collector's gRPC receiver is on 4317. Without this the starter defaults to
+      # http/protobuf and silently fails exporting to the gRPC port, so Tempo stayed empty.
+      protocol: ${OTEL_EXPORTER_OTLP_PROTOCOL:grpc}
   resource:
     attributes:
       service.name: platform-api
