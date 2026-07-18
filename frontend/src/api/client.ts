@@ -14,7 +14,7 @@ import type {
   Template,
   TemplateDetail,
 } from "./types";
-import { accessToken, handleUnauthorized } from "../auth/auth";
+import { accessToken, handleUnauthorized, renewToken } from "../auth/auth";
 import { mockHandler } from "../mocks/mockApi";
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === "true";
@@ -58,7 +58,26 @@ async function call<T>(method: string, path: string, body?: unknown, idempotency
   });
   if (!response.ok) {
     if (response.status === 401) {
-      handleUnauthorized(); // session expired — kick off re-login (no-op in dev-bypass)
+      // Access token likely expired. Renew it silently (refresh-token grant — no iframe) and retry
+      // the request ONCE, so expiry doesn't lose the action (e.g. a promote). Only bounce to the
+      // login page if renewal or the retry still fails. The Idempotency-Key is preserved, so a
+      // retried POST is deduped server-side and never double-applies.
+      const fresh = await renewToken();
+      if (fresh) {
+        const retry = await fetch(`/api/v1${path}`, {
+          method,
+          headers: { ...headers, Authorization: `Bearer ${fresh}` },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        if (retry.status !== 401) {
+          if (!retry.ok) {
+            const p = await retry.json().catch(() => ({}));
+            throw new ApiError(retry.status, p.code ?? "UNKNOWN", p.detail ?? retry.statusText);
+          }
+          return retry.status === 204 ? (undefined as T) : (retry.json() as Promise<T>);
+        }
+      }
+      handleUnauthorized(); // renewal not possible — re-login (no-op in dev-bypass)
       throw new ApiError(401, "UNAUTHENTICATED", "Your session expired — signing you back in…");
     }
     const problem = await response.json().catch(() => ({}));
