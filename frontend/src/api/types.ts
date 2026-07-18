@@ -133,6 +133,7 @@ export interface CreateRequestPayload {
   resourceName: string;
   description?: string;
   configuration: Record<string, unknown>;
+  tags?: Record<string, string>; // optional custom tags (TagEditor); mandatory tags win server-side
 }
 
 export interface DlqMoveTask {

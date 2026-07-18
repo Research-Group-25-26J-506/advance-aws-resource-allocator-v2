@@ -57,6 +57,7 @@ public class RequestService {
             String region,
             String resourceName,
             Map<String, Object> formData,
+            Map<String, String> customTags,
             String idempotencyKey) {
 
         TemplateVersion version = templates
@@ -83,6 +84,7 @@ public class RequestService {
                 region,
                 resourceName,
                 formData,
+                customTags,
                 idempotencyKey,
                 now);
         RequestStatus next =
@@ -156,6 +158,7 @@ public class RequestService {
                 source.region(),
                 source.resourceName(),
                 source.formData(),
+                source.customTags(),
                 idempotencyKey);
         audit.record(actorId, actorEmail, "RESOURCE_PROMOTED", "REQUEST", promoted.id().toString(),
                 Map.of("from", source.environment().name(), "to", next.name(),

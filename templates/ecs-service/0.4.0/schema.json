@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ECS Service",
+  "type": "object",
+  "required": ["serviceName", "image"],
+  "additionalProperties": false,
+  "properties": {
+    "serviceName": {
+      "type": "string",
+      "title": "Service name",
+      "pattern": "^[a-z][a-z0-9-]{1,40}$"
+    },
+    "image": {
+      "type": "string",
+      "title": "Container image URI",
+      "x-help": "Full URI incl. tag - an ECR repo in this account or a public image."
+    },
+    "containerPort": {
+      "type": "integer",
+      "title": "Container port",
+      "minimum": 1,
+      "maximum": 65535,
+      "default": 8080
+    },
+    "cpu": {
+      "type": "string",
+      "title": "CPU units",
+      "enum": ["256", "512", "1024"],
+      "default": "256",
+      "x-help": "256 = 0.25 vCPU."
+    },
+    "memory": {
+      "type": "string",
+      "title": "Memory (MB)",
+      "enum": ["512", "1024", "2048"],
+      "default": "512"
+    },
+    "desiredCount": {
+      "type": "integer",
+      "title": "Desired task count",
+      "minimum": 0,
+      "maximum": 5,
+      "default": 1
+    },
+    "attachAlb": {
+      "type": "boolean",
+      "title": "Reachable via the platform ALB",
+      "default": false,
+      "x-help": "Routes an ALB path to this service so it's reachable at the platform URL."
+    },
+    "albPath": {
+      "type": "string",
+      "title": "ALB path pattern",
+      "default": "/",
+      "x-help": "e.g. /orders/* - requests to this path reach this service."
+    },
+    "albPriority": {
+      "type": "integer",
+      "title": "ALB rule priority",
+      "minimum": 1,
+      "maximum": 50000,
+      "default": 100,
+      "x-help": "Unique per ALB-attached service; pick a distinct number."
+    },
+    "healthCheckPath": {
+      "type": "string",
+      "title": "Health check path",
+      "default": "/"
+    },
+    "forwardLogsToS3": {
+      "type": "boolean",
+      "title": "Forward logs to S3",
+      "default": false,
+      "x-help": "Streams this service's logs to the platform logs bucket via Firehose."
+    }
+  }
+}

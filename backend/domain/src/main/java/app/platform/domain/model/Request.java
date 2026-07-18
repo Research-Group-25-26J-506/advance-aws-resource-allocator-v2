@@ -21,6 +21,7 @@ public class Request {
     private final String region;
     private final String resourceName;
     private final Map<String, Object> formData;
+    private final Map<String, String> customTags;
     private final String idempotencyKey;
     private final Instant submittedAt;
     private RequestStatus status;
@@ -38,6 +39,7 @@ public class Request {
             String region,
             String resourceName,
             Map<String, Object> formData,
+            Map<String, String> customTags,
             String idempotencyKey,
             Instant submittedAt,
             RequestStatus status) {
@@ -51,6 +53,7 @@ public class Request {
         this.region = region;
         this.resourceName = resourceName;
         this.formData = Map.copyOf(formData);
+        this.customTags = customTags == null ? Map.of() : Map.copyOf(customTags);
         this.idempotencyKey = idempotencyKey;
         this.submittedAt = submittedAt;
         this.status = status;
@@ -67,6 +70,7 @@ public class Request {
             String region,
             String resourceName,
             Map<String, Object> formData,
+            Map<String, String> customTags,
             String idempotencyKey,
             Instant now) {
         return new Request(
@@ -80,6 +84,7 @@ public class Request {
                 region,
                 resourceName,
                 formData,
+                customTags,
                 idempotencyKey,
                 now,
                 RequestStatus.PENDING_VALIDATION);
@@ -139,6 +144,11 @@ public class Request {
 
     public Map<String, Object> formData() {
         return formData;
+    }
+
+    /** User-supplied extra tags (TagEditor). Applied at provision, but mandatory tags always win. */
+    public Map<String, String> customTags() {
+        return customTags;
     }
 
     public String idempotencyKey() {

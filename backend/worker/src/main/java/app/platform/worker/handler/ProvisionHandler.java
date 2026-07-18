@@ -14,6 +14,7 @@ import app.platform.domain.service.TemplateRenderer;
 import app.platform.messaging.WorkMessage;
 import app.platform.persistence.repo.SpringDataRepos;
 import app.platform.worker.aws.ExecRoleResolver;
+import app.platform.worker.aws.GroupClusterManager;
 import app.platform.worker.consume.WorkDispatcher.Outcome;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -43,6 +44,7 @@ public class ProvisionHandler {
     private final AwsErrorClassifier errorClassifier;
     private final SpringDataRepos.Teams teams;
     private final ExecRoleResolver execRoles;
+    private final GroupClusterManager groupClusters;
     private final Counter created;
     private final Counter failed;
 
@@ -56,6 +58,7 @@ public class ProvisionHandler {
             AwsErrorClassifier errorClassifier,
             SpringDataRepos.Teams teams,
             ExecRoleResolver execRoles,
+            GroupClusterManager groupClusters,
             MeterRegistry metrics) {
         this.requests = requests;
         this.templates = templates;
@@ -66,6 +69,7 @@ public class ProvisionHandler {
         this.errorClassifier = errorClassifier;
         this.teams = teams;
         this.execRoles = execRoles;
+        this.groupClusters = groupClusters;
         this.created = metrics.counter("stack_create_initiated");
         this.failed = metrics.counter("stack_create_failed");
     }
@@ -97,6 +101,13 @@ public class ProvisionHandler {
             // collide (deltaalpha-...-dev vs -qa vs -stg vs -prod).
             if (cfnBody.matches("(?s).*\\n {2}Environment:\\s*\\n.*")) {
                 rendered.parameters().put("Environment", request.environment().name().toLowerCase());
+            }
+            // Per-group compute isolation: templates that declare a `ClusterName` parameter run on
+            // the resource group's OWN ECS cluster (created on demand), never the platform cluster.
+            if (cfnBody.matches("(?s).*\\n {2}ClusterName:\\s*\\n.*")) {
+                rendered.parameters().put(
+                        "ClusterName",
+                        groupClusters.ensureCluster(request.resourceName(), request.environment().name()));
             }
             Team team = teams.findById(request.teamId())
                     .map(t -> new Team(t.getId(), t.getName(), t.getCostCenter()))
@@ -155,7 +166,13 @@ public class ProvisionHandler {
     }
 
     private String stackName(Request request) {
-        String shortId = request.id().toString().substring(0, 8);
-        return "platform-%s-%s-%s".formatted(request.templateId(), request.resourceName(), shortId);
+        // Use the RANDOM tail of the UUIDv7, not its first 8 hex: those are a millisecond-timestamp
+        // prefix that only rolls over every ~65s, so two requests for the same template+resourceName
+        // within that window (classically a group restore, or two quick provisions) produced an
+        // IDENTICAL stack name and the second collided with "stack already exists". The last 8 hex
+        // are rand_b — still stable per request (so retries/idempotency are unaffected) but unique.
+        String compact = request.id().toString().replace("-", "");
+        String suffix = compact.substring(compact.length() - 8);
+        return "platform-%s-%s-%s".formatted(request.templateId(), request.resourceName(), suffix);
     }
 }

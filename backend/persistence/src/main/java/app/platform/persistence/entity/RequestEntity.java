@@ -45,6 +45,9 @@ public class RequestEntity {
     @Column(name = "form_data_json", nullable = false, columnDefinition = "JSON")
     private String formDataJson;
 
+    @Column(name = "custom_tags_json", columnDefinition = "JSON")
+    private String customTagsJson;
+
     @Column(name = "idempotency_key", nullable = false)
     private String idempotencyKey;
 
@@ -71,6 +74,7 @@ public class RequestEntity {
             String resourceName,
             String status,
             String formDataJson,
+            String customTagsJson,
             String idempotencyKey,
             String stackId,
             String failureReason,
@@ -86,6 +90,7 @@ public class RequestEntity {
         this.resourceName = resourceName;
         this.status = status;
         this.formDataJson = formDataJson;
+        this.customTagsJson = customTagsJson;
         this.idempotencyKey = idempotencyKey;
         this.stackId = stackId;
         this.failureReason = failureReason;
@@ -134,6 +139,10 @@ public class RequestEntity {
 
     public String getFormDataJson() {
         return formDataJson;
+    }
+
+    public String getCustomTagsJson() {
+        return customTagsJson;
     }
 
     public String getIdempotencyKey() {
