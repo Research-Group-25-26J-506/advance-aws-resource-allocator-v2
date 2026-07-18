@@ -269,6 +269,12 @@ Resources:
                 Effect: Allow
                 Action: [ssm:GetParameter, ssm:GetParameters, ssm:GetParametersByPath]
                 Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/platform/*
+              - Sid: GroupClusters
+                # Per-group ECS clusters (platform-grp-<group>-<env>). CreateCluster has no
+                # resource-level scoping (must be "*"); the rest are harmless cluster-management.
+                Effect: Allow
+                Action: [ecs:CreateCluster, ecs:DescribeClusters, ecs:DeleteCluster, ecs:TagResource]
+                Resource: "*"
 
   WebTaskRole:
     Type: AWS::IAM::Role

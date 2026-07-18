@@ -13,4 +13,5 @@ dependencies {
     api(libs.aws.cloudwatchlogs)
     api(libs.aws.codebuild)
     api(libs.aws.costexplorer)
+    api(libs.aws.ecs)
 }
