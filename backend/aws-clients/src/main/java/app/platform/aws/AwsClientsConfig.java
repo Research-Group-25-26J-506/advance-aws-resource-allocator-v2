@@ -12,6 +12,7 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.cloudformation.CloudFormationClient;
 import software.amazon.awssdk.services.cloudwatchlogs.CloudWatchLogsClient;
 import software.amazon.awssdk.services.codebuild.CodeBuildClient;
+import software.amazon.awssdk.services.costexplorer.CostExplorerClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.sqs.SqsClient;
@@ -86,5 +87,15 @@ public class AwsClientsConfig {
     @Bean
     public CodeBuildClient codeBuildClient() {
         return CodeBuildClient.builder().applyMutation(common()).build();
+    }
+
+    /**
+     * Cost Explorer is a global service (signed in us-east-1) and has no LocalStack community
+     * support, so it always talks to the real endpoint via the default credential chain. In the
+     * `local` profile the CostService simply catches the failure and reports "unavailable".
+     */
+    @Bean
+    public CostExplorerClient costExplorerClient() {
+        return CostExplorerClient.builder().region(Region.AWS_GLOBAL).build();
     }
 }

@@ -31,6 +31,8 @@ const TopologyPage = lazy(() => import("./pages/TopologyPage"));
 const ServiceLogsPage = lazy(() => import("./pages/ServiceLogsPage"));
 const BuildsPage = lazy(() => import("./pages/BuildsPage"));
 const TemplatesAdminPage = lazy(() => import("./pages/TemplatesAdminPage"));
+const OperationsPage = lazy(() => import("./pages/OperationsPage"));
+const CostsPage = lazy(() => import("./pages/CostsPage"));
 
 export default function App() {
   const [me, setMe] = useState<Me | null>(null);
@@ -69,6 +71,7 @@ export default function App() {
     { type: "link", text: "Deployments", href: "/deployments" },
     { type: "link", text: "Build from repo", href: "/builds" },
     { type: "link", text: "Service Logs", href: "/service-logs" },
+    { type: "link", text: "Costs", href: "/costs" },
     ...(hasRole(me, "APPROVER")
       ? [{ type: "link", text: "Approvals", href: "/approvals" } satisfies SideNavigationProps.Item]
       : []),
@@ -77,6 +80,9 @@ export default function App() {
           { type: "link", text: "Templates", href: "/admin/templates" } satisfies SideNavigationProps.Item,
           { type: "link", text: "Sync history", href: "/admin/sync" } satisfies SideNavigationProps.Item,
         ]
+      : []),
+    ...(hasRole(me, "PLATFORM_ADMIN")
+      ? [{ type: "link", text: "Operations", href: "/operations" } satisfies SideNavigationProps.Item]
       : []),
     { type: "divider" },
     { type: "link", text: "Observability (Grafana)", href: "https://grafana.example.internal", external: true },
@@ -185,6 +191,7 @@ export default function App() {
               {/* Deployments = provisioning an ecs-service; source-to-image builds come with the GitHub App */}
               <Route path="/deployments" element={<CreateResourceWizard templateOverride="ecs-service" />} />
               <Route path="/service-logs" element={<ServiceLogsPage />} />
+              <Route path="/costs" element={<CostsPage />} />
               <Route path="/builds" element={<BuildsPage />} />
               <Route path="/runbooks" element={<RunbooksPage />} />
               <Route
@@ -192,6 +199,14 @@ export default function App() {
                 element={
                   <RequireRole roles={["PLATFORM_ADMIN", "APPROVER"]}>
                     <AuditLogPage />
+                  </RequireRole>
+                }
+              />
+              <Route
+                path="/operations"
+                element={
+                  <RequireRole roles={["PLATFORM_ADMIN"]}>
+                    <OperationsPage />
                   </RequireRole>
                 }
               />

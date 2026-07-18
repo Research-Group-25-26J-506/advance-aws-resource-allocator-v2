@@ -12,4 +12,5 @@ dependencies {
     api(libs.aws.ssm)
     api(libs.aws.cloudwatchlogs)
     api(libs.aws.codebuild)
+    api(libs.aws.costexplorer)
 }

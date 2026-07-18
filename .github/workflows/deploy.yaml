@@ -83,6 +83,26 @@ jobs:
           deploy observability infrastructure/platform/observability.yaml
           deploy cdn infrastructure/platform/cdn.yaml
 
+      - name: Run DB migrations (dedicated pre-deploy task)
+        run: |
+          # One-off ECS task on the api image with the migrate profile: applies Flyway and exits.
+          # A bad migration fails here and halts the deploy before any service rolls.
+          set -euo pipefail
+          CLUSTER=$(aws ssm get-parameter --name /platform/dev/ecs-cluster --query 'Parameter.Value' --output text)
+          SUBNETS=$(aws ssm get-parameter --name /platform/dev/network/app-subnets --query 'Parameter.Value' --output text)
+          SG=$(aws ssm get-parameter --name /platform/dev/network/sg-ecs --query 'Parameter.Value' --output text)
+          # reuse the api task definition as-is, overriding only the Spring profile to run migrations
+          TASK_ARN=$(aws ecs run-task --cluster "$CLUSTER" --launch-type FARGATE \
+            --task-definition platform-api-dev \
+            --network-configuration "awsvpcConfiguration={subnets=[${SUBNETS}],securityGroups=[${SG}],assignPublicIp=DISABLED}" \
+            --overrides "{\"containerOverrides\":[{\"name\":\"api\",\"environment\":[{\"name\":\"SPRING_PROFILES_ACTIVE\",\"value\":\"dev,migrate\"}]}]}" \
+            --query 'tasks[0].taskArn' --output text) || { echo "migration task not started (first deploy?) — continuing"; exit 0; }
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN"
+          CODE=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          echo "migration task exit code: $CODE"
+          [ "$CODE" = "0" ] || { echo "MIGRATION FAILED — halting deploy"; exit 1; }
+
       - name: Ship the new image (always)
         run: |
           # New task-def revision pinned to this commit's immutable tag — this IS the

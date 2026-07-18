@@ -108,6 +108,16 @@ export const api = {
   getRequestOutputs: (id: string) => call<{ key: string; value: string }[]>("GET", `/requests/${id}/outputs`),
   createRequest: (payload: CreateRequestPayload, idempotencyKey: string) =>
     call<PlatformRequest>("POST", "/requests", payload, idempotencyKey),
+  dlqSummary: () => call<import("./types").DlqSummary>("GET", "/admin/dlq"),
+  dlqMessages: () => call<import("./types").DlqMessage[]>("GET", "/admin/dlq/messages"),
+  dlqRedrive: () => call<{ taskHandle: string }>("POST", "/admin/dlq/redrive", {}, uuidv7()),
+
+  costSummary: () => call<import("./types").CostSummary>("GET", "/costs/summary"),
+  costByTeam: () => call<import("./types").CostTeamSlice[]>("GET", "/costs/by-team"),
+  costByEnvironment: () => call<import("./types").CostEnvSlice[]>("GET", "/costs/by-environment"),
+  costForResource: (requestId: string) =>
+    call<import("./types").ResourceCost>("GET", `/costs/resource/${requestId}`),
+
   retryRequest: (id: string) => call<PlatformRequest>("POST", `/requests/${id}/retry`, undefined, uuidv7()),
   reconcileRequest: (id: string) => call<PlatformRequest>("POST", `/requests/${id}/reconcile`, undefined, uuidv7()),
   promoteRequest: (id: string) => call<PlatformRequest>("POST", `/requests/${id}/promote`, undefined, uuidv7()),

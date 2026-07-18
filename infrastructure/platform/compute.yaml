@@ -189,6 +189,17 @@ Resources:
                 Effect: Allow
                 Action: [sqs:SendMessage]
                 Resource: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/sqs/requests-queue-arn}}"
+              - Sid: DlqOps
+                # Operator DLQ console (Phase C): read depth, peek stuck messages, and redrive back
+                # to the source queue via a native SQS message-move task. PLATFORM_ADMIN only (API).
+                Effect: Allow
+                Action:
+                  - sqs:GetQueueAttributes
+                  - sqs:ReceiveMessage
+                  - sqs:StartMessageMoveTask
+                  - sqs:ListMessageMoveTasks
+                  - sqs:CancelMessageMoveTask
+                Resource: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/sqs/requests-dlq-arn}}"
               - Sid: Idempotency
                 Effect: Allow
                 # DeleteItem: the filter drops its reservation instead of caching 5xx responses
@@ -212,6 +223,12 @@ Resources:
                 Effect: Allow
                 Action: [codebuild:StartBuild, codebuild:BatchGetBuilds]
                 Resource: !Sub arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/platform-${EnvironmentName}-image-builder
+              - Sid: CostExplorerRead
+                # Cost visibility (governance-by-visibility): read-only Cost Explorer. CE has no
+                # resource-level scoping, so Resource must be "*"; all actions are read-only.
+                Effect: Allow
+                Action: [ce:GetCostAndUsage, ce:GetCostForecast, ce:GetDimensionValues, ce:GetTags]
+                Resource: "*"
 
   WorkerTaskRole:
     Type: AWS::IAM::Role
@@ -292,6 +309,8 @@ Resources:
             - { Name: AWS_REGION, Value: !Ref AWS::Region }
             - { Name: PLATFORM_DB_HOST, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/db/proxy-endpoint}}" }
             - { Name: PLATFORM_REQUESTS_QUEUE_URL, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/sqs/requests-queue-url}}" }
+            - { Name: PLATFORM_REQUESTS_DLQ_URL, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/sqs/requests-dlq-url}}" }
+            - { Name: PLATFORM_REQUESTS_DLQ_ARN, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/sqs/requests-dlq-arn}}" }
             - { Name: PLATFORM_TEMPLATES_BUCKET, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/templates-bucket}}" }
             - { Name: PLATFORM_IDEMPOTENCY_TABLE, Value: !Sub "platform-idempotency-${EnvironmentName}" }
             - { Name: PLATFORM_COGNITO_ISSUER, Value: !Sub "{{resolve:ssm:/platform/${EnvironmentName}/auth/issuer-uri}}" }

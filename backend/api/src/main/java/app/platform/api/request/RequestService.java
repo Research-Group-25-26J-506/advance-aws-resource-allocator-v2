@@ -166,6 +166,11 @@ public class RequestService {
     @Transactional
     public Request approve(String actorId, UUID id) {
         Request request = get(id);
+        // Separation of duties: the requester cannot approve their own PROD request, regardless
+        // of the roles they hold (Phase A security).
+        if (request.requesterId().equals(actorId)) {
+            throw new app.platform.domain.error.SelfApprovalException(id);
+        }
         request.transitionTo(RequestStatus.QUEUED); // legal only from PENDING_APPROVAL
         requests.save(request);
         requests.appendEvent(id, RequestStatus.PENDING_APPROVAL, RequestStatus.QUEUED,

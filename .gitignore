@@ -29,5 +29,10 @@ Thumbs.db
 dev/.data/
 localstack-volume/
 
+# Playwright e2e artifacts
+frontend/test-results/
+frontend/playwright-report/
+frontend/playwright.mock.config.ts
+
 # Build metadata
 *.log

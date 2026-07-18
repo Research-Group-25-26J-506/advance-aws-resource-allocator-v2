@@ -23,6 +23,7 @@ aws-sts = { module = "software.amazon.awssdk:sts" }
 aws-ssm = { module = "software.amazon.awssdk:ssm" }
 aws-cloudwatchlogs = { module = "software.amazon.awssdk:cloudwatchlogs" }
 aws-codebuild = { module = "software.amazon.awssdk:codebuild" }
+aws-costexplorer = { module = "software.amazon.awssdk:costexplorer" }
 jinjava = { module = "com.hubspot.jinjava:jinjava", version.ref = "jinjava" }
 json-schema-validator = { module = "com.networknt:json-schema-validator", version.ref = "jsonSchemaValidator" }
 uuid-creator = { module = "com.github.f4b6a3:uuid-creator", version.ref = "uuidCreator" }

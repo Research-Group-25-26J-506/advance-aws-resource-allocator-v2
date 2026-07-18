@@ -18,6 +18,8 @@ tags:
   - name: requests
   - name: templates
   - name: admin-sync
+  - name: admin
+  - name: costs
   - name: approvals
   - name: misc
 
@@ -265,6 +267,158 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/TemplateSync" }
         "404": { $ref: "#/components/responses/Problem" }
+
+  /admin/dlq:
+    get:
+      tags: [admin]
+      operationId: dlqSummary
+      summary: Dead-letter queue depth + last redrive task (PLATFORM_ADMIN)
+      responses:
+        "200":
+          description: DLQ summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  configured: { type: boolean }
+                  visible: { type: integer }
+                  notVisible: { type: integer }
+                  redrive:
+                    type: object
+                    properties:
+                      status: { type: string }
+                      moved: { type: [integer, "null"] }
+                      toMove: { type: [integer, "null"] }
+                      failureReason: { type: [string, "null"] }
+
+  /admin/dlq/messages:
+    get:
+      tags: [admin]
+      operationId: dlqMessages
+      summary: Peek up to 10 stuck messages, non-destructively (PLATFORM_ADMIN)
+      responses:
+        "200":
+          description: Sample of dead-lettered messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    messageId: { type: string }
+                    receiveCount: { type: string }
+                    firstSentAt: { type: string }
+                    body: { type: string }
+
+  /admin/dlq/redrive:
+    post:
+      tags: [admin]
+      operationId: dlqRedrive
+      summary: Redrive all dead-lettered messages back to the source queue (PLATFORM_ADMIN)
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                maxMessagesPerSecond: { type: [integer, "null"] }
+      responses:
+        "202":
+          description: Message-move task started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  taskHandle: { type: string }
+
+  /costs/summary:
+    get:
+      tags: [costs]
+      operationId: costSummary
+      summary: Month-to-date spend, previous month, and 6-month trend
+      responses:
+        "200":
+          description: Account cost summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  available: { type: boolean }
+                  currency: { type: string }
+                  monthToDate: { type: number }
+                  previousMonth: { type: number }
+                  trend:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        month: { type: string }
+                        amount: { type: number }
+                  updatedAt: { type: string }
+                  note: { type: [string, "null"] }
+
+  /costs/by-team:
+    get:
+      tags: [costs]
+      operationId: costByTeam
+      summary: Current-month spend by team (CostCenter cost-allocation tag)
+      responses:
+        "200":
+          description: Spend per team
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    costCenter: { type: string }
+                    team: { type: string }
+                    amount: { type: number }
+
+  /costs/by-environment:
+    get:
+      tags: [costs]
+      operationId: costByEnvironment
+      summary: Current-month spend by environment (Environment cost-allocation tag)
+      responses:
+        "200":
+          description: Spend per environment
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    key: { type: string }
+                    amount: { type: number }
+
+  /costs/resource/{requestId}:
+    get:
+      tags: [costs]
+      operationId: costForResource
+      summary: Month-to-date spend for one resource (PlatformRequestId tag)
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Resource cost
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  available: { type: boolean }
+                  currency: { type: string }
+                  monthToDate: { type: number }
 
   /approvals:
     get:

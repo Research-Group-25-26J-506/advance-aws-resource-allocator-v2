@@ -11,7 +11,7 @@ import SpaceBetween from "@cloudscape-design/components/space-between";
 import StatusIndicator from "@cloudscape-design/components/status-indicator";
 import Table from "@cloudscape-design/components/table";
 import { api } from "../api/client";
-import type { EnvironmentHealth, Kpi, PlatformRequest } from "../api/types";
+import type { CostSummary, EnvironmentHealth, Kpi, PlatformRequest } from "../api/types";
 import PlatformStatus from "../components/PlatformStatus";
 import { useMe } from "../auth/useMe";
 import { relativeTime } from "../util/time";
@@ -23,10 +23,12 @@ export default function DashboardPage() {
   const [kpis, setKpis] = useState<Record<string, Kpi> | null>(null);
   const [requests, setRequests] = useState<PlatformRequest[] | null>(null);
   const [health, setHealth] = useState<EnvironmentHealth[] | null>(null);
+  const [spend, setSpend] = useState<CostSummary | null>(null);
 
   useEffect(() => {
     api.kpis().then(setKpis).catch(() => setKpis({}));
     api.listMyRequests(10).then(setRequests).catch(() => setRequests([]));
+    api.costSummary().then(setSpend).catch(() => setSpend(null));
     const loadHealth = () => api.environmentsHealth().then(setHealth).catch(() => setHealth([]));
     loadHealth();
     const timer = setInterval(loadHealth, 60_000); // poll health every 60s (2.02 enhancement)
@@ -60,6 +62,31 @@ export default function DashboardPage() {
           <KpiCard title="Failed (30d)" kpi={kpis?.failed_30d} href="/requests" />
           <KpiCard title="Avg completion (s)" kpi={kpis?.avg_completion_seconds} href="/requests" />
         </ColumnLayout>
+
+        {spend?.available && (
+          <Container>
+            <SpaceBetween size="xs">
+              <Box variant="awsui-key-label">Month-to-date spend · all environments</Box>
+              <SpaceBetween direction="horizontal" size="l">
+                <Link href="/costs" fontSize="display-l" variant="primary">
+                  {money(spend.monthToDate, spend.currency)}
+                </Link>
+                {spend.previousMonth > 0 && (
+                  <Box
+                    color={spend.monthToDate > spend.previousMonth ? "text-status-error" : "text-status-success"}
+                    fontSize="body-s"
+                    fontWeight="bold"
+                    padding={{ top: "xl" }}
+                  >
+                    {spend.monthToDate > spend.previousMonth ? "▲" : "▼"}{" "}
+                    {Math.abs(((spend.monthToDate - spend.previousMonth) / spend.previousMonth) * 100).toFixed(1)}% vs
+                    last month
+                  </Box>
+                )}
+              </SpaceBetween>
+            </SpaceBetween>
+          </Container>
+        )}
 
         <Table
           header={<Header counter={requests ? `(${requests.length})` : undefined}>My recent requests</Header>}
@@ -121,6 +148,10 @@ export default function DashboardPage() {
       </SpaceBetween>
     </ContentLayout>
   );
+}
+
+function money(n: number, currency = "USD"): string {
+  return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(n);
 }
 
 function KpiCard({ title, kpi, href }: { title: string; kpi?: Kpi; href: string }) {

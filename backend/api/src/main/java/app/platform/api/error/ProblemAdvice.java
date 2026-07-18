@@ -30,6 +30,11 @@ public class ProblemAdvice {
         return problem(HttpStatus.CONFLICT, e.getMessage(), e.code(), req);
     }
 
+    @ExceptionHandler(app.platform.domain.error.SelfApprovalException.class)
+    public ProblemDetail forbidden(app.platform.domain.error.SelfApprovalException e, HttpServletRequest req) {
+        return problem(HttpStatus.FORBIDDEN, e.getMessage(), e.code(), req);
+    }
+
     @ExceptionHandler(PlatformException.class)
     public ProblemDetail platform(PlatformException e, HttpServletRequest req) {
         return problem(HttpStatus.UNPROCESSABLE_ENTITY, e.getMessage(), e.code(), req);

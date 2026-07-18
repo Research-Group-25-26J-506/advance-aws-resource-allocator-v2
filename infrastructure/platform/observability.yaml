@@ -334,5 +334,43 @@ Resources:
       Type: String
       Value: /grafana
 
+  # ---------------------------------------------------------------- Alerting (4.12)
+  # One central topic for platform alarms. Subscribe email/Slack/PagerDuty out-of-band (a
+  # chatbot/webhook subscription needs a secret we don't hold here); the ARN is in SSM for that.
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub platform-alerts-${EnvironmentName}
+      DisplayName: Platform alerts
+
+  SsmAlertsTopicArn:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/alerts/topic-arn
+      Type: String
+      Value: !Ref AlertsTopic
+
+  # Anything in the work DLQ means a request exhausted every retry. Fire immediately so an operator
+  # triages in the Operations console and redrives once the cause is fixed (Phase C loop).
+  DlqNotEmptyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub platform-${EnvironmentName}-requests-dlq-not-empty
+      AlarmDescription: Requests dead-letter queue is non-empty — a request failed all retries.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !Sub platform-requests-dlq-${EnvironmentName}
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertsTopic]
+      OKActions: [!Ref AlertsTopic]
+
 Outputs:
   GrafanaTargetGroupArn: { Value: !Ref GrafanaTargetGroup }
+  AlertsTopicArn: { Value: !Ref AlertsTopic }

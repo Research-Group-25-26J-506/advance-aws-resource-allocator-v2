@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 // Dev server proxies /api to the local Spring Boot api service (8.06).
@@ -15,5 +15,11 @@ export default defineConfig({
   },
   build: {
     sourcemap: true,
+  },
+  test: {
+    // Vitest runs unit tests only. The Playwright e2e specs live under e2e/ and import
+    // @playwright/test — they must NOT be collected here or Playwright's test() throws.
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    exclude: ["e2e/**", "node_modules/**", "dist/**"],
   },
 });
