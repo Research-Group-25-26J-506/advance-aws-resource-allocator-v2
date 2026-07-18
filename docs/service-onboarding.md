@@ -162,12 +162,24 @@ reach parity + the "Figma-board" experience:
 | ArgoCD GitOps → **EKS** | ECS deploy ✅; **EKS runtime 🔜** (see below) |
 | Canary rollouts | ECS circuit breaker ✅; CodeDeploy canary 🔜 |
 
-**EKS support (next major runtime).** Add `deployment.runtime: ecs | eks` to service.yaml.
-For `eks`: a platform EKS cluster (or reuse), the build stays identical (image → ECR), and
-deploy renders a Deployment+Service+Ingress (Helm/manifest) applied via a Kubernetes provider
-custom resource or a Flux/ArgoCD bridge. The Job/CronJob shapes map to K8s Job/CronJob natively
-(the Asset Transfer / List Synchronizer workloads land cleanly). Scheduled-task and service
-templates gain an EKS variant; the request pipeline, approvals, promotion, groups all stay.
+**EKS support — infrastructure READY (opt-in, ~$73/mo control plane).** Two templates ship:
+- `infrastructure/platform/eks-cluster.yaml` — a **serverless** EKS cluster (Fargate profiles,
+  no EC2 nodes to pay for idle), reusing the platform VPC/subnets. Deploy once when you want the
+  runtime: `aws cloudformation deploy --stack-name platform-eks-dev --template-file
+  infrastructure/platform/eks-cluster.yaml --capabilities CAPABILITY_NAMED_IAM
+  --parameter-overrides EnvironmentName=dev`.
+- `infrastructure/platform/eks-deployer.yaml` — since K8s manifests aren't a CloudFormation
+  resource type, EKS workloads deploy via a **CodeBuild project running `kubectl apply`** (the
+  ArgoCD-apply equivalent), granted cluster-admin via an EKS access entry.
+
+**EKS deploy flow.** `deployment.runtime: ecs | eks` in service.yaml selects the path. For `eks`:
+build stays identical (image → ECR via the image-builder); the platform renders
+`templates/eks-service/manifest.yaml.tmpl` (Deployment + Service) with the service's values,
+base64-encodes it, and triggers the eks-deployer with `MANIFEST_B64` → `kubectl apply`. Job and
+CronJob shapes render native K8s `Job`/`CronJob` (the Asset Transfer / List Synchronizer
+workloads land cleanly). The request pipeline, approvals, promotion, groups, topology all stay —
+only the deploy backend branches on runtime. Backend wiring (render + trigger + status) is the
+next build item; the infrastructure and manifest template are in place.
 
 **Service topology visualization (the Figma-board view).** A React diagram per group/service
 showing: repo → build → image → the deployed resources (service, task def, ALB rule, DB, queue)

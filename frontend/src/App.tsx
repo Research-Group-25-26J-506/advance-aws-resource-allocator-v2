@@ -27,6 +27,7 @@ const AuditLogPage = lazy(() => import("./pages/AuditLogPage"));
 const RunbooksPage = lazy(() => import("./pages/RunbooksPage"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
 const ResourceGroupsPage = lazy(() => import("./pages/ResourceGroupsPage"));
+const TopologyPage = lazy(() => import("./pages/TopologyPage"));
 const ServiceLogsPage = lazy(() => import("./pages/ServiceLogsPage"));
 const BuildsPage = lazy(() => import("./pages/BuildsPage"));
 const TemplatesAdminPage = lazy(() => import("./pages/TemplatesAdminPage"));
@@ -63,6 +64,7 @@ export default function App() {
     { type: "link", text: "Dashboard", href: "/" },
     { type: "link", text: "Catalog", href: "/catalog" },
     { type: "link", text: "Resources", href: "/resources" },
+    { type: "link", text: "Topology", href: "/topology" },
     { type: "link", text: "My Requests", href: "/requests" },
     { type: "link", text: "Deployments", href: "/deployments" },
     { type: "link", text: "Build from repo", href: "/builds" },
@@ -153,6 +155,7 @@ export default function App() {
               <Route path="/catalog" element={<CatalogPage />} />
               <Route path="/catalog/:templateId" element={<CreateResourceWizard />} />
               <Route path="/resources" element={<ResourceGroupsPage />} />
+              <Route path="/topology" element={<TopologyPage />} />
               <Route path="/requests" element={<RequestsListPage />} />
               <Route path="/requests/:id" element={<RequestDetailPage />} />
               <Route
