@@ -74,11 +74,78 @@ networking.
 - PROD stays out of scope this iteration; when it lands it inherits the approvals gate and
   adds the hardening pass (change windows, canary option).
 
+## 4. How ECS deployment works TODAY (and where it's going)
+
+**Today — image-in, wizard-driven.** An ECS service is a CloudFormation template
+(`templates/ecs-service/`) provisioned through the normal request pipeline:
+
+```
+wizard/config params → TemplateRenderer maps them to CFN parameters
+  (image, port, cpu, memory, attachAlb, albPath, forwardLogsToS3)
+  + worker injects Environment
+→ worker STS-assumes the exec role → CreateStack
+→ CFN builds: TaskDefinition + ExecutionRole + Service (+ TargetGroup + ListenerRule
+  if attachAlb) (+ Firehose + subscription if forwardLogsToS3)
+→ ECS pulls the image from ECR/registry and runs it in the private app subnets
+```
+
+You give it an **image URI** and it runs. VPC, subnets, cluster, and security groups are
+**resolved from SSM** (`/platform/{env}/network/*`, `/ecs-cluster`) — they must already exist
+(they do: the platform stacks created them). The template never creates a VPC; it *consumes*
+the platform's.
+
+**Try it:** catalog → ECS Service → name `hello-web`, image `public.ecr.aws/nginx/nginx:1.27-alpine`,
+port 80, attachAlb=true, path `/hello/*`, priority 300 → the ServiceUrl output is your live URL.
+
+**Where it's going — config-in, git-driven (the target).** Instead of an image URI, the service
+declares a **git repo**; the platform builds the image itself. The onboarding artifact becomes:
+
+```yaml
+# .platform/service.yaml in the service repo
+service: orders-api
+group: pastry-plus
+repo: https://github.com/Research-Group-25-26J-506/orders-api   # org must match allowlist
+environments: [dev, qa]                                          # visualized as a pipeline
+
+deployment:
+  type: service
+  port: 8080
+  healthCheckPath: /healthz
+
+infrastructure:            # ensure-exists; the "next" preview surfaces the RESOLVED values
+  vpc: default             # -> resolves to vpc-0abc... (shown before submit)
+  subnets: private         # -> subnet-0a.., subnet-0b.. (shown)
+  alb: { attach: true, path: /orders/* }
+  logs: { destination: s3 }
+
+build:
+  dockerfile: ./Dockerfile
+```
+
+Design rules for this path:
+- **Org allowlist**: `repo` must belong to an approved GitHub org (checked dynamically against a
+  configurable allowlist, e.g. `Research-Group-25-26J-506`), else onboarding is rejected — no
+  building arbitrary repos.
+- **Config preview on "Next"**: before submit, the wizard shows the *resolved* infrastructure —
+  the actual VPC id, subnet ids, ALB, exec role that will be used — so the chosen configuration
+  is explicit and reviewable (your "note down the VPC and subnets" ask). Mandatory pieces
+  (VPC/subnets present, task definition, exec role, ALB when `attach`) are validated at this
+  step and block submit if unresolvable.
+- **Build then deploy**: GitHub App webhook → CodeBuild builds the Dockerfile → pushes to ECR →
+  the platform provisions/updates the ecs-service with that image. App change = rebuild+roll;
+  infra change = stack update (§ change detection above).
+
 ## Build order for the next iteration
 
-1. `vpc-network` + `alb-attach` + `logs-to-s3` catalog templates (the ensure-exists targets)
-2. Group column on requests (explicit `group` distinct from resource name) + group-aware wizard ✅ (name-keyed version live)
-3. `service.yaml` reader: repo webhook/scan → diff → the change-detection actions above
-4. GitHub App + CodeBuild for the build-image-on-app-change path
-5. Group page pipeline visualization with inline promote
-6. PROD iteration: approvals + canary + change windows
+1. **`vpc-network` template** — provision a VPC + public/private subnets for accounts that need
+   more than the platform default (the ensure-exists fallback target).
+2. **`service.yaml` reader + config preview** — parse the repo config, resolve infra from SSM,
+   show the resolved VPC/subnets/roles on wizard "Next", validate mandatory pieces.
+3. **Org allowlist** check on `repo`.
+4. **GitHub App + CodeBuild** — build the image from the repo so `repo:` replaces `image:`.
+5. Group page pipeline visualization with inline promote; reconciliation sweep for stuck requests.
+6. PROD iteration: approvals + canary + change windows.
+
+Done in the current iteration: resource groups (create → attach → cascade delete → restore),
+env-suffixed names, dynamic env chain, promotion, ecs-service with ALB + logs-to-S3,
+ecs-scheduled-task, rds placement + connection outputs.
