@@ -10,6 +10,8 @@ import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -25,6 +27,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/groups")
 public class GroupController {
+
+    private static final Logger log = LoggerFactory.getLogger(GroupController.class);
 
     public record CreatePayload(String name, String description) {}
 
@@ -90,12 +94,29 @@ public class GroupController {
             try {
                 requests.delete(auth.getName(), toUuid(raw));
                 deleted++;
-            } catch (Exception ignored) {
-                // skip anything not in a deletable state
+            } catch (Exception e) {
+                log.warn("Group '{}' delete: could not delete {}: {}", name, toUuid(raw), e.getMessage());
             }
         }
-        audit.record(auth.getName(), auth.getName(), "GROUP_DELETED", "GROUP", name, Map.of("count", deleted));
-        return ResponseEntity.ok(Map.of("deleted", deleted));
+        // Re-drive anything already DELETE_IN_PROGRESS: a prior delete message may have been lost
+        // (worker replaced mid-flight), so the request shows "deleting" but the stack still exists.
+        // Re-enqueuing the delete is what makes "Delete all" actually tear those stacks down.
+        List<byte[]> stuck = jdbc.queryForList(
+                "SELECT id FROM requests WHERE resource_name = ? AND status = 'DELETE_IN_PROGRESS'",
+                byte[].class, name);
+        int redriven = 0;
+        for (byte[] raw : stuck) {
+            try {
+                requests.reconcile(auth.getName(), toUuid(raw));
+                redriven++;
+            } catch (Exception e) {
+                log.warn("Group '{}' delete: could not re-drive {}: {}", name, toUuid(raw), e.getMessage());
+            }
+        }
+        audit.record(auth.getName(), auth.getName(), "GROUP_DELETED", "GROUP", name,
+                Map.of("deleted", deleted, "redriven", redriven));
+        log.info("Group '{}' delete: {} deleted, {} re-driven", name, deleted, redriven);
+        return ResponseEntity.ok(Map.of("deleted", deleted, "redriven", redriven));
     }
 
     /**
