@@ -82,10 +82,11 @@ async function doInit(): Promise<AuthMode> {
     response_type: "code",
     scope: "openid email profile",
     userStore: new WebStorageStateStore({ store: window.sessionStorage }),
-    // NO automaticSilentRenew: it renews via a hidden iframe that loads the /auth/callback route,
-    // which this SPA can't service (it runs signinRedirectCallback + a full replace) and which
-    // loops. Expiry is handled by the global 401 handler (redirect — seamless via Cognito's cookie).
+    // NO automaticSilentRenew: its BACKGROUND iframe renew loaded the /auth/callback route, which
+    // this SPA can't service and which looped. Instead we renew ON DEMAND on a 401 (see renewToken)
+    // using the refresh token via the token endpoint — no iframe, no loop.
     automaticSilentRenew: false,
+    silentRequestTimeoutInSeconds: 10, // bound any renew attempt so it can never hang
   });
   manager.events.addUserLoaded((user) => {
     currentUser = user;
@@ -134,6 +135,29 @@ async function doCompleteLogin(): Promise<string> {
 
 export function accessToken(): string | null {
   return currentUser && !currentUser.expired ? currentUser.access_token : null;
+}
+
+/**
+ * Renew the access token WITHOUT a full-page redirect, so an expired token doesn't lose the action
+ * the user just took. With Cognito's authorization-code flow this uses the refresh token via the
+ * token endpoint (no iframe, so it can't loop like the old silent renew). Returns the fresh access
+ * token, or null if renewal isn't possible — the caller then falls back to the redirect login.
+ */
+export async function renewToken(): Promise<string | null> {
+  if (config.authMode !== "cognito" || !manager) {
+    return null;
+  }
+  try {
+    const user = await manager.signinSilent();
+    if (user && !user.expired) {
+      currentUser = user;
+      clearSigninGuard();
+      return user.access_token;
+    }
+  } catch {
+    // no refresh token, or renewal failed — the caller redirects to the Hosted UI
+  }
+  return null;
 }
 
 /**

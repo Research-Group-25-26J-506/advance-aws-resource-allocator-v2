@@ -83,21 +83,45 @@ jobs:
           deploy observability infrastructure/platform/observability.yaml
           deploy cdn infrastructure/platform/cdn.yaml
 
-      - name: Run DB migrations (dedicated pre-deploy task)
+      - name: Run DB migrations (dedicated pre-deploy task, new image)
         run: |
-          # One-off ECS task on the api image with the migrate profile: applies Flyway and exits.
-          # A bad migration fails here and halts the deploy before any service rolls.
+          # One-off ECS task that runs THIS commit's api image with the migrate profile: applies
+          # Flyway and exits. A bad migration fails here and halts the deploy before the services
+          # roll. (The api also runs Flyway at boot as a safety net, but validating here first keeps
+          # a broken migration from ever reaching a running task.)
           set -euo pipefail
+          SHA=$(git rev-parse --short HEAD)
           CLUSTER=$(aws ssm get-parameter --name /platform/dev/ecs-cluster --query 'Parameter.Value' --output text)
           SUBNETS=$(aws ssm get-parameter --name /platform/dev/network/app-subnets --query 'Parameter.Value' --output text)
           SG=$(aws ssm get-parameter --name /platform/dev/network/sg-ecs --query 'Parameter.Value' --output text)
-          # reuse the api task definition as-is, overriding only the Spring profile to run migrations
+          REPO=$(aws ssm get-parameter --name /platform/dev/ecr-repo --query 'Parameter.Value' --output text)
+          # Base the migration task on the current api task def (family platform-dev-api), but swap in
+          # the NEW image and the migrate profile so it actually exercises this deploy's migrations.
+          BASE=$(aws ecs describe-task-definition --task-definition platform-dev-api --query 'taskDefinition' 2>/dev/null) \
+            || { echo "no api task def yet (first deploy) — app-boot Flyway will migrate; continuing"; exit 0; }
+          # Fail-SAFE from here: any hiccup building/launching the migration task falls back to the
+          # app-boot Flyway (continue). Only a genuine non-zero MIGRATION exit code halts the deploy.
+          FALLBACK='app-boot Flyway will apply migrations; continuing'
+          MIGRATE_TD=$(echo "$BASE" | jq --arg img "${REPO}:api-${SHA}" '
+            .containerDefinitions |= map(
+              if .name=="api" then
+                .image=$img
+                | .environment=(((.environment // []) | map(select(.name!="SPRING_PROFILES_ACTIVE")))
+                    + [{name:"SPRING_PROFILES_ACTIVE", value:"dev,migrate"}])
+              else . end)
+            | {family:"platform-dev-api-migrate", taskRoleArn, executionRoleArn, networkMode,
+               containerDefinitions, requiresCompatibilities, cpu, memory, runtimePlatform}') \
+            || { echo "could not build migration task def — $FALLBACK"; exit 0; }
+          TD_ARN=$(aws ecs register-task-definition --cli-input-json "$MIGRATE_TD" \
+            --query 'taskDefinition.taskDefinitionArn' --output text) \
+            || { echo "register-task-definition failed — $FALLBACK"; exit 0; }
           TASK_ARN=$(aws ecs run-task --cluster "$CLUSTER" --launch-type FARGATE \
-            --task-definition platform-api-dev \
+            --task-definition "$TD_ARN" \
             --network-configuration "awsvpcConfiguration={subnets=[${SUBNETS}],securityGroups=[${SG}],assignPublicIp=DISABLED}" \
-            --overrides "{\"containerOverrides\":[{\"name\":\"api\",\"environment\":[{\"name\":\"SPRING_PROFILES_ACTIVE\",\"value\":\"dev,migrate\"}]}]}" \
-            --query 'tasks[0].taskArn' --output text) || { echo "migration task not started (first deploy?) — continuing"; exit 0; }
-          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN"
+            --query 'tasks[0].taskArn' --output text) \
+            || { echo "run-task failed — $FALLBACK"; exit 0; }
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN" \
+            || { echo "wait tasks-stopped failed — $FALLBACK"; exit 0; }
           CODE=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" \
             --query 'tasks[0].containers[0].exitCode' --output text)
           echo "migration task exit code: $CODE"

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 import Badge from "@cloudscape-design/components/badge";
 import Box from "@cloudscape-design/components/box";
@@ -10,7 +10,6 @@ import Modal from "@cloudscape-design/components/modal";
 import ContentLayout from "@cloudscape-design/components/content-layout";
 import Header from "@cloudscape-design/components/header";
 import SpaceBetween from "@cloudscape-design/components/space-between";
-import Spinner from "@cloudscape-design/components/spinner";
 import { api } from "../api/client";
 import type { PlatformRequest } from "../api/types";
 import PlatformStatus from "../components/PlatformStatus";
@@ -29,13 +28,20 @@ export default function ResourceGroupsPage() {
   const [newName, setNewName] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = () => {
-    api.listMyRequests(100).then(setRequests).catch(() => setRequests([]));
-    api.listGroups().then(setDeclaredGroups).catch(() => undefined);
-  };
-  useEffect(refresh, []);
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([
+      api.listMyRequests(100).then(setRequests).catch(() => setRequests([])),
+      api.listGroups().then(setDeclaredGroups).catch(() => undefined),
+    ]);
+    setRefreshing(false);
+  }, []);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const createGroup = async () => {
     setBusy(true);
@@ -89,14 +95,7 @@ export default function ResourceGroupsPage() {
   }, [requests, declaredGroups]);
 
   const envChain = platformEnvironments();
-
-  if (requests === null) {
-    return (
-      <Box textAlign="center" padding="xxl">
-        <Spinner size="large" />
-      </Box>
-    );
-  }
+  const loading = requests === null;
 
   return (
     <ContentLayout
@@ -106,7 +105,7 @@ export default function ResourceGroupsPage() {
           description="One group per resource name — its resources across every environment. Promote from any environment's request page."
           actions={
             <SpaceBetween direction="horizontal" size="xs">
-              <Button iconName="refresh" onClick={refresh} ariaLabel="Refresh" />
+              <Button iconName="refresh" onClick={refresh} loading={refreshing} ariaLabel="Refresh" />
               <Button onClick={() => setCreateVisible(true)}>Create resource group</Button>
               <Button variant="primary" onClick={() => navigate("/catalog")}>
                 Provision a resource
@@ -119,12 +118,14 @@ export default function ResourceGroupsPage() {
       }
     >
       <SpaceBetween size="l">
-        {groups.length === 0 && (
+        {loading && <GroupsSkeleton />}
+        {!loading && groups.length === 0 && (
           <Box textAlign="center" padding="l" color="text-status-inactive">
             Nothing provisioned yet — start in the catalog.
           </Box>
         )}
-        {groups.map(([name, templates]) => (
+        {!loading &&
+          groups.map(([name, templates]) => (
           <Container
             key={name}
             header={
@@ -237,5 +238,40 @@ export default function ResourceGroupsPage() {
         </SpaceBetween>
       </Modal>
     </ContentLayout>
+  );
+}
+
+/** Placeholder cards shown while the groups load, so a refresh reads as "loading", not "empty". */
+function GroupsSkeleton() {
+  return (
+    <SpaceBetween size="l">
+      <style>{"@keyframes sk-pulse{0%,100%{opacity:.4}50%{opacity:.85}}"}</style>
+      {[0, 1, 2].map((i) => (
+        <Container key={i}>
+          <SpaceBetween size="m">
+            <SkeletonBar width="180px" height={18} />
+            <SpaceBetween size="xs">
+              <SkeletonBar width="70%" />
+              <SkeletonBar width="55%" />
+            </SpaceBetween>
+          </SpaceBetween>
+        </Container>
+      ))}
+    </SpaceBetween>
+  );
+}
+
+function SkeletonBar({ width = "100%", height = 14 }: { width?: string; height?: number }) {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        width,
+        height,
+        borderRadius: 4,
+        background: "rgba(127,127,127,0.22)",
+        animation: "sk-pulse 1.4s ease-in-out infinite",
+      }}
+    />
   );
 }
