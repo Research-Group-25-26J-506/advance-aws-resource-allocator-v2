@@ -88,12 +88,10 @@ jobs:
           # One-off ECS task on the api image with the migrate profile: applies Flyway and exits.
           # A bad migration fails here and halts the deploy before any service rolls.
           set -euo pipefail
-          SHA=$(git rev-parse --short HEAD)
           CLUSTER=$(aws ssm get-parameter --name /platform/dev/ecs-cluster --query 'Parameter.Value' --output text)
           SUBNETS=$(aws ssm get-parameter --name /platform/dev/network/app-subnets --query 'Parameter.Value' --output text)
           SG=$(aws ssm get-parameter --name /platform/dev/network/sg-ecs --query 'Parameter.Value' --output text)
-          REPO=$(aws ssm get-parameter --name /platform/dev/ecr-repo --query 'Parameter.Value' --output text)
-          # reuse the api task definition, override the profile + command image tag
+          # reuse the api task definition as-is, overriding only the Spring profile to run migrations
           TASK_ARN=$(aws ecs run-task --cluster "$CLUSTER" --launch-type FARGATE \
             --task-definition platform-api-dev \
             --network-configuration "awsvpcConfiguration={subnets=[${SUBNETS}],securityGroups=[${SG}],assignPublicIp=DISABLED}" \
