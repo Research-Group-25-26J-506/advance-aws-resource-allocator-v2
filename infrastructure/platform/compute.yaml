@@ -204,6 +204,10 @@ Resources:
                 Effect: Allow
                 Action: [ssm:GetParameter, ssm:GetParameters, ssm:GetParametersByPath]
                 Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/platform/*
+              - Sid: AppLogs
+                Effect: Allow
+                Action: [logs:DescribeLogGroups, logs:FilterLogEvents, logs:GetLogEvents]
+                Resource: "*"
 
   WorkerTaskRole:
     Type: AWS::IAM::Role

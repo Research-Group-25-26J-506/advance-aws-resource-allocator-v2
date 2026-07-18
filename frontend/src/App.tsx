@@ -27,6 +27,7 @@ const AuditLogPage = lazy(() => import("./pages/AuditLogPage"));
 const RunbooksPage = lazy(() => import("./pages/RunbooksPage"));
 const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
 const ResourceGroupsPage = lazy(() => import("./pages/ResourceGroupsPage"));
+const ServiceLogsPage = lazy(() => import("./pages/ServiceLogsPage"));
 const TemplatesAdminPage = lazy(() => import("./pages/TemplatesAdminPage"));
 
 export default function App() {
@@ -63,6 +64,7 @@ export default function App() {
     { type: "link", text: "Resources", href: "/resources" },
     { type: "link", text: "My Requests", href: "/requests" },
     { type: "link", text: "Deployments", href: "/deployments" },
+    { type: "link", text: "Service Logs", href: "/service-logs" },
     ...(hasRole(me, "APPROVER")
       ? [{ type: "link", text: "Approvals", href: "/approvals" } satisfies SideNavigationProps.Item]
       : []),
@@ -177,6 +179,7 @@ export default function App() {
               />
               {/* Deployments = provisioning an ecs-service; source-to-image builds come with the GitHub App */}
               <Route path="/deployments" element={<CreateResourceWizard templateOverride="ecs-service" />} />
+              <Route path="/service-logs" element={<ServiceLogsPage />} />
               <Route path="/runbooks" element={<RunbooksPage />} />
               <Route
                 path="/audit"

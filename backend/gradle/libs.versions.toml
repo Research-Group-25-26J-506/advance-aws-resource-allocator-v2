@@ -21,6 +21,7 @@ aws-dynamodb = { module = "software.amazon.awssdk:dynamodb" }
 aws-cloudformation = { module = "software.amazon.awssdk:cloudformation" }
 aws-sts = { module = "software.amazon.awssdk:sts" }
 aws-ssm = { module = "software.amazon.awssdk:ssm" }
+aws-cloudwatchlogs = { module = "software.amazon.awssdk:cloudwatchlogs" }
 jinjava = { module = "com.hubspot.jinjava:jinjava", version.ref = "jinjava" }
 json-schema-validator = { module = "com.networknt:json-schema-validator", version.ref = "jsonSchemaValidator" }
 uuid-creator = { module = "com.github.f4b6a3:uuid-creator", version.ref = "uuidCreator" }
