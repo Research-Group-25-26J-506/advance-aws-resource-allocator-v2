@@ -8,7 +8,18 @@ Description: >-
 Parameters:
   EnvironmentName:
     Type: String
-    AllowedValues: [dev, stg, prod]
+    AllowedValues: [dev, qa, stg, prod]
+    Description: >-
+      The environment NAMESPACE these roles serve. Under the single-platform model this only names
+      the roles and their SSM path (/platform/{env}/exec-roles/...) — deploy this stack once per
+      environment you want to promote into. It does NOT stand up a separate control plane.
+  WorkerRoleName:
+    Type: String
+    Default: platform-dev-worker-task-role
+    Description: >-
+      The ONE platform worker task role that STS-assumes these exec roles, regardless of which env
+      namespace they belong to. Fixed (not per-env) so a single worker can provision-and-promote
+      the same resource up through dev/qa/stg/prod.
 
 Resources:
   DefaultExecRole:
@@ -21,7 +32,7 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              AWS: !Sub arn:aws:iam::${AWS::AccountId}:role/platform-${EnvironmentName}-worker-task-role
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:role/${WorkerRoleName}
             Action: sts:AssumeRole
       # Resource stacks span many services; PowerUser minus IAM, with IAM limited to roles the
       # templates themselves create (lambda exec roles etc. under a recognisable prefix).
@@ -67,7 +78,7 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              AWS: !Sub arn:aws:iam::${AWS::AccountId}:role/platform-${EnvironmentName}-worker-task-role
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:role/${WorkerRoleName}
             Action: sts:AssumeRole
       Policies:
         - PolicyName: s3-and-cfn
@@ -110,7 +121,7 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              AWS: !Sub arn:aws:iam::${AWS::AccountId}:role/platform-${EnvironmentName}-worker-task-role
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:role/${WorkerRoleName}
             Action: sts:AssumeRole
       Policies:
         - PolicyName: sqs-and-cfn
@@ -145,7 +156,7 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              AWS: !Sub arn:aws:iam::${AWS::AccountId}:role/platform-${EnvironmentName}-worker-task-role
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:role/${WorkerRoleName}
             Action: sts:AssumeRole
       Policies:
         - PolicyName: dynamodb-and-cfn
@@ -184,7 +195,7 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              AWS: !Sub arn:aws:iam::${AWS::AccountId}:role/platform-${EnvironmentName}-worker-task-role
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:role/${WorkerRoleName}
             Action: sts:AssumeRole
       Policies:
         - PolicyName: sns-and-cfn

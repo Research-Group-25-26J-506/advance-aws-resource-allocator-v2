@@ -67,7 +67,9 @@ public class DeleteHandler {
             stackLauncher.deleteStack(
                     request.stackId(),
                     execRoles.resolve(
-                            manifest == null ? null : manifest.executionRoleArn(), request.templateId()),
+                            manifest == null ? null : manifest.executionRoleArn(),
+                            request.templateId(),
+                            request.environment()),
                     request.environment(),
                     request.region());
             log.info("DeleteStack initiated for request {}", request.id());

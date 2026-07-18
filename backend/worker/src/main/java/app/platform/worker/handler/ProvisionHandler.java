@@ -111,7 +111,7 @@ public class ProvisionHandler {
                     rendered.parameters(),
                     tags,
                     manifest.cfnCapabilities(),
-                    execRoles.resolve(manifest.executionRoleArn(), request.templateId()),
+                    execRoles.resolve(manifest.executionRoleArn(), request.templateId(), request.environment()),
                     request.environment(),
                     request.region(),
                     work.idempotencyKey()));
