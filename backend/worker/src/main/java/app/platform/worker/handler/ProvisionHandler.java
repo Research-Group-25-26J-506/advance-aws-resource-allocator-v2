@@ -155,7 +155,13 @@ public class ProvisionHandler {
     }
 
     private String stackName(Request request) {
-        String shortId = request.id().toString().substring(0, 8);
-        return "platform-%s-%s-%s".formatted(request.templateId(), request.resourceName(), shortId);
+        // Use the RANDOM tail of the UUIDv7, not its first 8 hex: those are a millisecond-timestamp
+        // prefix that only rolls over every ~65s, so two requests for the same template+resourceName
+        // within that window (classically a group restore, or two quick provisions) produced an
+        // IDENTICAL stack name and the second collided with "stack already exists". The last 8 hex
+        // are rand_b — still stable per request (so retries/idempotency are unaffected) but unique.
+        String compact = request.id().toString().replace("-", "");
+        String suffix = compact.substring(compact.length() - 8);
+        return "platform-%s-%s-%s".formatted(request.templateId(), request.resourceName(), suffix);
     }
 }
