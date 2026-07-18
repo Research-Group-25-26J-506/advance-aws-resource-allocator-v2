@@ -135,6 +135,46 @@ Design rules for this path:
   the platform provisions/updates the ecs-service with that image. App change = rebuild+roll;
   infra change = stack update (§ change detection above).
 
+## Source-to-image: LIVE (the platform builds images itself)
+
+`infrastructure/platform/codebuild.yaml` deploys a CodeBuild project the platform triggers with
+per-build overrides (repo URL, ref, image tag, Dockerfile). It clones the repo, `docker build`s,
+and pushes to ECR — **on AWS, not on anyone's laptop**. Proven end-to-end:
+`Research-Group-25-26J-506/pastry-orders-api` → CodeBuild → ECR (`pastry-orders-api-v1`) →
+ecs-service on the cluster, ALB `/orders/*`, logs streaming — zero local Docker.
+
+- **Build from repo** page + `POST /api/v1/builds` (org allowlist enforced) → StartBuild →
+  status tracked (CodeBuild polled). `GET /apps` + Service Logs page tail any service's logs.
+- Org allowlist: `platform.build.allowed-orgs` (default `Research-Group-25-26J-506`).
+- Next: auto-deploy on build success (build → deploy the ecs-service with the produced tag in
+  one flow); GitHub App webhook so a push triggers it; buildpack option (no Dockerfile).
+
+## Revamp roadmap — full ECS + EKS + visualization
+
+The platform now matches PaaStry's build+registry layer on AWS-native services. Remaining to
+reach parity + the "Figma-board" experience:
+
+| PaaStry | Here — status |
+| --- | --- |
+| Concourse auto-pipelines | CodeBuild source-to-image ✅ (webhook auto-trigger 🔜) |
+| Harbor | ECR ✅ |
+| Sonarqube/Veracode scans | Trivy in CI ✅; SAST 🔜 |
+| ArgoCD GitOps → **EKS** | ECS deploy ✅; **EKS runtime 🔜** (see below) |
+| Canary rollouts | ECS circuit breaker ✅; CodeDeploy canary 🔜 |
+
+**EKS support (next major runtime).** Add `deployment.runtime: ecs | eks` to service.yaml.
+For `eks`: a platform EKS cluster (or reuse), the build stays identical (image → ECR), and
+deploy renders a Deployment+Service+Ingress (Helm/manifest) applied via a Kubernetes provider
+custom resource or a Flux/ArgoCD bridge. The Job/CronJob shapes map to K8s Job/CronJob natively
+(the Asset Transfer / List Synchronizer workloads land cleanly). Scheduled-task and service
+templates gain an EKS variant; the request pipeline, approvals, promotion, groups all stay.
+
+**Service topology visualization (the Figma-board view).** A React diagram per group/service
+showing: repo → build → image → the deployed resources (service, task def, ALB rule, DB, queue)
+× environment, as a live board (react-flow or mermaid). Nodes are clickable → the request /
+logs / outputs. This makes "what is present" visible at a glance — the group env-chip rows are
+the text version; the board is the visual one.
+
 ## Build order for the next iteration
 
 1. **`vpc-network` template** — provision a VPC + public/private subnets for accounts that need

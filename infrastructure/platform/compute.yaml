@@ -208,6 +208,10 @@ Resources:
                 Effect: Allow
                 Action: [logs:DescribeLogGroups, logs:FilterLogEvents, logs:GetLogEvents]
                 Resource: "*"
+              - Sid: TriggerBuilds
+                Effect: Allow
+                Action: [codebuild:StartBuild, codebuild:BatchGetBuilds]
+                Resource: !Sub arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/platform-${EnvironmentName}-image-builder
 
   WorkerTaskRole:
     Type: AWS::IAM::Role

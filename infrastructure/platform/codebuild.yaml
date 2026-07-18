@@ -1,0 +1,110 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Source-to-image build pipeline (PaaStry Concourse+Harbor equivalent). One CodeBuild project the
+  platform triggers with per-build overrides (repo URL, ref, image tag, Dockerfile). It clones the
+  repo, builds the image, and pushes to ECR - the platform builds images itself; nobody runs Docker
+  locally. Public repos need no source credential; private repos pass a token env override.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [dev, stg, prod]
+
+Resources:
+  BuildLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /platform/${EnvironmentName}/builds
+      RetentionInDays: 30
+
+  BuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-${EnvironmentName}-image-builder
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: build
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Logs
+                Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents, logs:CreateLogGroup]
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/platform/${EnvironmentName}/builds:*
+              - Sid: EcrAuth
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Sid: EcrPush
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:PutImage
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/platform-images-${EnvironmentName}
+
+  ImageBuilder:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub platform-${EnvironmentName}-image-builder
+      ServiceRole: !GetAtt BuildRole.Arn
+      TimeoutInMinutes: 20
+      Artifacts: { Type: NO_ARTIFACTS }
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        PrivilegedMode: true # docker build
+        EnvironmentVariables:
+          - { Name: ECR_REGISTRY, Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com" }
+          - { Name: ECR_REPO, Value: !Sub "platform-images-${EnvironmentName}" }
+          - { Name: REPO_URL, Value: "https://github.com/example/repo" }
+          - { Name: REPO_REF, Value: "main" }
+          - { Name: IMAGE_TAG, Value: "unset" }
+          - { Name: DOCKERFILE, Value: "Dockerfile" }
+          - { Name: GIT_TOKEN, Value: "" }
+      LogsConfig:
+        CloudWatchLogs: { GroupName: !Sub "/platform/${EnvironmentName}/builds", Status: ENABLED }
+      Source:
+        Type: NO_SOURCE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            pre_build:
+              commands:
+                - echo "Building $IMAGE_TAG from $REPO_URL@$REPO_REF"
+                - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+                - |
+                  if [ -n "$GIT_TOKEN" ]; then
+                    CLONE_URL=$(echo "$REPO_URL" | sed "s#https://#https://x-access-token:${GIT_TOKEN}@#")
+                  else
+                    CLONE_URL="$REPO_URL"
+                  fi
+                - git clone --depth 1 --branch "$REPO_REF" "$CLONE_URL" src
+            build:
+              commands:
+                - cd src
+                - docker build -t "$ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG" -f "$DOCKERFILE" .
+            post_build:
+              commands:
+                - docker push "$ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG"
+                - echo "Pushed $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG"
+
+  SsmBuilderName:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/image-builder-project
+      Type: String
+      Value: !Ref ImageBuilder
+
+Outputs:
+  ImageBuilderProject: { Value: !Ref ImageBuilder }

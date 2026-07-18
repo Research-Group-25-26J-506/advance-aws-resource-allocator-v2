@@ -84,6 +84,9 @@ export const api = {
     call<{ name: string }>("POST", "/groups", { name, description }, uuidv7()),
   deleteGroup: (name: string) => call<{ deleted: number }>("POST", `/groups/${name}/delete`, undefined, uuidv7()),
   restoreGroup: (name: string) => call<{ restored: number }>("POST", `/groups/${name}/restore`, undefined, uuidv7()),
+  listBuilds: () => call<import("./types").BuildRun[]>("GET", "/builds"),
+  triggerBuild: (repo: string, ref: string, serviceName: string) =>
+    call<{ id: string; imageTag: string }>("POST", "/builds", { repo, ref, serviceName }, uuidv7()),
   listApps: () => call<{ logGroup: string; name: string; storedBytes: number }[]>("GET", "/apps"),
   tailAppLogs: (logGroup: string) =>
     call<{ timestamp: number; message: string }[]>("GET", `/apps/logs?logGroup=${encodeURIComponent(logGroup)}`),
