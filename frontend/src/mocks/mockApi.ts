@@ -185,6 +185,20 @@ export async function mockHandler(method: string, path: string, body?: unknown):
       { key: "DEV", amount: 29.26 },
     ];
   if (path.startsWith("/costs/resource/")) return { available: true, currency: "USD", monthToDate: 18.44 };
+  if (method === "POST" && path === "/builds")
+    return { id: crypto.randomUUID(), imageTag: `svc-${crypto.randomUUID().slice(0, 8)}` };
+  if (path === "/builds")
+    return [
+      {
+        id: crypto.randomUUID(),
+        serviceName: "pastry-orders-api",
+        repo: "https://github.com/Research-Group-25-26J-506/pastry-orders-api",
+        ref: "main",
+        imageTag: "pastry-orders-api-9f7a12b3",
+        status: "SUCCEEDED",
+        startedAt: new Date(Date.now() - 600e3).toISOString(),
+      },
+    ];
   if (path.startsWith("/requests")) return requests;
   throw new Error(`No mock for ${method} ${path}`);
 }

@@ -20,6 +20,7 @@ tags:
   - name: admin-sync
   - name: admin
   - name: costs
+  - name: builds
   - name: approvals
   - name: misc
 
@@ -419,6 +420,57 @@ paths:
                   available: { type: boolean }
                   currency: { type: string }
                   monthToDate: { type: number }
+
+  /builds:
+    get:
+      tags: [builds]
+      operationId: listBuilds
+      summary: Recent source-to-image builds (status refreshed from CodeBuild)
+      responses:
+        "200":
+          description: Build runs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string, format: uuid }
+                    serviceName: { type: string }
+                    repo: { type: string }
+                    ref: { type: string }
+                    imageTag: { type: string }
+                    status: { type: string, enum: [IN_PROGRESS, SUCCEEDED, FAILED] }
+                    startedAt: { type: string }
+    post:
+      tags: [builds]
+      operationId: triggerBuild
+      summary: Trigger a build from a git repo (org must be allowlisted)
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repo]
+              properties:
+                repo: { type: string, description: "https://github.com/<org>/<repo>" }
+                ref: { type: string, description: "Branch or tag; defaults to main" }
+                serviceName: { type: string, pattern: "^[a-z][a-z0-9-]{1,40}$" }
+      responses:
+        "200":
+          description: Build started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  imageTag: { type: string }
+        "403": { description: Org not allowlisted }
 
   /approvals:
     get:
