@@ -101,7 +101,7 @@ public class GroupController {
     public ResponseEntity<Map<String, Object>> restore(@PathVariable String name, Authentication auth) {
         // latest deleted request per (template, env) — the thing to bring back
         var members = jdbc.queryForList(
-                "SELECT r.template_id, r.environment, r.region, r.form_data_json FROM requests r"
+                "SELECT r.template_id, r.environment, r.region, r.form_data_json, r.custom_tags_json FROM requests r"
                         + " JOIN (SELECT template_id, environment, MAX(submitted_at) AS latest FROM requests"
                         + "       WHERE resource_name = ? AND status = 'DELETE_COMPLETE'"
                         + "       GROUP BY template_id, environment) m"
@@ -113,6 +113,10 @@ public class GroupController {
             try {
                 Map<String, Object> formData =
                         mapper.readValue((String) member.get("form_data_json"), new TypeReference<>() {});
+                String tagsJson = (String) member.get("custom_tags_json");
+                Map<String, String> customTags = tagsJson == null || tagsJson.isBlank()
+                        ? Map.of()
+                        : mapper.readValue(tagsJson, new TypeReference<>() {});
                 requests.submit(
                         auth.getName(),
                         auth.getName(),
@@ -121,6 +125,7 @@ public class GroupController {
                         (String) member.get("region"),
                         name,
                         formData,
+                        customTags,
                         UuidV7.generate().toString());
                 restored++;
             } catch (Exception ignored) {

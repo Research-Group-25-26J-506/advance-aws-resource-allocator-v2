@@ -429,7 +429,7 @@ export default function CreateResourceWizard({ templateOverride }: { templateOve
                     i18nStrings={TAG_EDITOR_I18N}
                     tags={customTags}
                     tagLimit={40}
-                    onChange={({ detail }) => setCustomTags(detail.tags)}
+                    onChange={({ detail }) => setCustomTags([...detail.tags])}
                   />
                 </Container>
               </SpaceBetween>
