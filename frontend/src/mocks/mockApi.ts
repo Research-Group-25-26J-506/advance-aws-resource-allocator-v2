@@ -185,8 +185,10 @@ export async function mockHandler(method: string, path: string, body?: unknown):
       { key: "DEV", amount: 29.26 },
     ];
   if (path.startsWith("/costs/resource/")) return { available: true, currency: "USD", monthToDate: 18.44 };
-  if (method === "POST" && path === "/builds")
-    return { id: crypto.randomUUID(), imageTag: `svc-${crypto.randomUUID().slice(0, 8)}` };
+  if (method === "POST" && path === "/builds") {
+    const tag = `svc-${crypto.randomUUID().slice(0, 8)}`;
+    return { id: crypto.randomUUID(), imageTag: tag, imageUri: `111122223333.dkr.ecr.us-east-1.amazonaws.com/platform-svc-svc:${tag}` };
+  }
   if (path === "/builds")
     return [
       {
@@ -195,6 +197,8 @@ export async function mockHandler(method: string, path: string, body?: unknown):
         repo: "https://github.com/Research-Group-25-26J-506/pastry-orders-api",
         ref: "main",
         imageTag: "pastry-orders-api-9f7a12b3",
+        imageUri:
+          "111122223333.dkr.ecr.us-east-1.amazonaws.com/platform-svc-pastry-orders-api:pastry-orders-api-9f7a12b3",
         status: "SUCCEEDED",
         startedAt: new Date(Date.now() - 600e3).toISOString(),
       },

@@ -13,6 +13,7 @@ import software.amazon.awssdk.services.cloudformation.CloudFormationClient;
 import software.amazon.awssdk.services.cloudwatchlogs.CloudWatchLogsClient;
 import software.amazon.awssdk.services.codebuild.CodeBuildClient;
 import software.amazon.awssdk.services.costexplorer.CostExplorerClient;
+import software.amazon.awssdk.services.ecr.EcrClient;
 import software.amazon.awssdk.services.ecs.EcsClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -93,6 +94,11 @@ public class AwsClientsConfig {
     @Bean
     public EcsClient ecsClient() {
         return EcsClient.builder().applyMutation(common()).build();
+    }
+
+    @Bean
+    public EcrClient ecrClient() {
+        return EcrClient.builder().applyMutation(common()).build();
     }
 
     /**

@@ -41,6 +41,8 @@ Resources:
                 Action: ecr:GetAuthorizationToken
                 Resource: "*"
               - Sid: EcrPush
+                # Per-service repos (platform-svc-<service>): the platform creates the repo on
+                # demand and the builder pushes the image there, isolated from the control plane.
                 Effect: Allow
                 Action:
                   - ecr:BatchCheckLayerAvailability
@@ -50,7 +52,7 @@ Resources:
                   - ecr:PutImage
                   - ecr:BatchGetImage
                   - ecr:GetDownloadUrlForLayer
-                Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/platform-images-${EnvironmentName}
+                Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/platform-svc-*
 
   ImageBuilder:
     Type: AWS::CodeBuild::Project

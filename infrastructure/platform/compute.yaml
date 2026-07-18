@@ -229,6 +229,12 @@ Resources:
                 Effect: Allow
                 Action: [ce:GetCostAndUsage, ce:GetCostForecast, ce:GetDimensionValues, ce:GetTags]
                 Resource: "*"
+              - Sid: EcrRepos
+                # Per-service image repositories (platform-svc-<service>): created on demand for
+                # source-to-image builds so user images never share the control-plane repo.
+                Effect: Allow
+                Action: [ecr:CreateRepository, ecr:DescribeRepositories, ecr:PutLifecyclePolicy, ecr:TagResource]
+                Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/platform-svc-*
 
   WorkerTaskRole:
     Type: AWS::IAM::Role

@@ -14,4 +14,5 @@ dependencies {
     api(libs.aws.codebuild)
     api(libs.aws.costexplorer)
     api(libs.aws.ecs)
+    api(libs.aws.ecr)
 }

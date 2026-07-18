@@ -76,6 +76,7 @@ export interface BuildRun {
   repo: string;
   ref: string;
   imageTag: string;
+  imageUri: string; // full ECR URI, copy-paste-ready for the deploy wizard
   status: string;
   startedAt: string;
 }

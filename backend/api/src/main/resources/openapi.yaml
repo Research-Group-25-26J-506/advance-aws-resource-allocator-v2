@@ -441,6 +441,7 @@ paths:
                     repo: { type: string }
                     ref: { type: string }
                     imageTag: { type: string }
+                    imageUri: { type: string }
                     status: { type: string, enum: [IN_PROGRESS, SUCCEEDED, FAILED] }
                     startedAt: { type: string }
     post:
@@ -470,6 +471,7 @@ paths:
                 properties:
                   id: { type: string, format: uuid }
                   imageTag: { type: string }
+                  imageUri: { type: string }
         "403": { description: Org not allowlisted }
 
   /approvals:
