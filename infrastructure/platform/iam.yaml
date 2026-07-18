@@ -54,5 +54,160 @@ Resources:
       Type: String
       Value: !GetAtt DefaultExecRole.Arn
 
+  # --- Per-template scoped roles (least privilege). The resolver prefers these over the default,
+  # so the common templates never touch PowerUser. Add one per template as it matures. ---
+
+  S3ExecRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-exec-s3-bucket-${EnvironmentName}
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:role/platform-${EnvironmentName}-worker-task-role
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: s3-and-cfn
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [cloudformation:*]
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - s3:CreateBucket
+                  - s3:DeleteBucket
+                  - s3:PutBucketVersioning
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:PutEncryptionConfiguration
+                  - s3:PutLifecycleConfiguration
+                  - s3:PutBucketPolicy
+                  - s3:DeleteBucketPolicy
+                  - s3:PutBucketTagging
+                  - s3:GetBucket*
+                  - s3:GetEncryptionConfiguration
+                  - s3:GetLifecycleConfiguration
+                  - s3:ListBucket
+                Resource: "*"
+  SsmS3Exec:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/exec-roles/s3-bucket
+      Type: String
+      Value: !GetAtt S3ExecRole.Arn
+
+  SqsExecRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-exec-sqs-queue-${EnvironmentName}
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:role/platform-${EnvironmentName}-worker-task-role
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: sqs-and-cfn
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [cloudformation:*]
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - sqs:CreateQueue
+                  - sqs:DeleteQueue
+                  - sqs:SetQueueAttributes
+                  - sqs:GetQueueAttributes
+                  - sqs:TagQueue
+                Resource: "*"
+  SsmSqsExec:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/exec-roles/sqs-queue
+      Type: String
+      Value: !GetAtt SqsExecRole.Arn
+
+  DynamoExecRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-exec-dynamodb-table-${EnvironmentName}
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:role/platform-${EnvironmentName}-worker-task-role
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: dynamodb-and-cfn
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [cloudformation:*]
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:CreateTable
+                  - dynamodb:DeleteTable
+                  - dynamodb:DescribeTable
+                  - dynamodb:UpdateTable
+                  - dynamodb:UpdateTimeToLive
+                  - dynamodb:DescribeTimeToLive
+                  - dynamodb:UpdateContinuousBackups
+                  - dynamodb:DescribeContinuousBackups
+                  - dynamodb:TagResource
+                Resource: "*"
+  SsmDynamoExec:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/exec-roles/dynamodb-table
+      Type: String
+      Value: !GetAtt DynamoExecRole.Arn
+
+  SnsExecRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-exec-sns-topic-${EnvironmentName}
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:role/platform-${EnvironmentName}-worker-task-role
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: sns-and-cfn
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [cloudformation:*]
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - sns:CreateTopic
+                  - sns:DeleteTopic
+                  - sns:SetTopicAttributes
+                  - sns:GetTopicAttributes
+                  - sns:TagResource
+                Resource: "*"
+  SsmSnsExec:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/exec-roles/sns-topic
+      Type: String
+      Value: !GetAtt SnsExecRole.Arn
+
 Outputs:
   DefaultExecRoleArn: { Value: !GetAtt DefaultExecRole.Arn }

@@ -42,6 +42,9 @@ public class SqsPollingService {
 
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicInteger inflight = new AtomicInteger();
+    // Receipt handles currently being processed — released (visibility 0) on shutdown so a
+    // task replaced mid-flight during a deploy never strands a message (Phase A reliability).
+    private final java.util.Set<String> inflightHandles = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private ExecutorService pollerPool;
     private ExecutorService handlerPool;
     private ScheduledExecutorService heartbeatPool;
@@ -103,6 +106,7 @@ public class SqsPollingService {
 
     private void handle(Message message) {
         long start = System.nanoTime();
+        inflightHandles.add(message.receiptHandle());
         // Heartbeat: extend visibility every 60s so slow handlers aren't redelivered mid-flight
         ScheduledFuture<?> heartbeat = heartbeatPool.scheduleAtFixedRate(
                 () -> sqs.changeMessageVisibility(b ->
@@ -127,6 +131,7 @@ public class SqsPollingService {
             log.error("Message handling failed; will redeliver (poison → DLQ after 5)", e);
         } finally {
             heartbeat.cancel(false);
+            inflightHandles.remove(message.receiptHandle());
             processingDuration.record(Duration.ofNanos(System.nanoTime() - start));
             inflight.decrementAndGet();
             MDC.clear(); // thread pools leak context otherwise
@@ -150,10 +155,20 @@ public class SqsPollingService {
                 Thread.currentThread().interrupt();
             }
         }
+        // Anything still in-flight after the drain window couldn't finish — release its message
+        // (visibility 0) so SQS redelivers it immediately to a healthy task, not after 5 minutes.
+        for (String handle : inflightHandles) {
+            try {
+                sqs.changeMessageVisibility(
+                        b -> b.queueUrl(queueUrl).receiptHandle(handle).visibilityTimeout(0));
+            } catch (Exception e) {
+                log.warn("Could not release in-flight message on shutdown", e);
+            }
+        }
         if (heartbeatPool != null) {
             heartbeatPool.shutdownNow();
         }
-        log.info("SQS consumer drained and stopped");
+        log.info("SQS consumer drained and stopped ({} messages released for redelivery)", inflightHandles.size());
     }
 
     private void sleep(Duration duration) {
