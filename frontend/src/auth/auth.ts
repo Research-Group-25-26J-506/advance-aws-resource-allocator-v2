@@ -25,6 +25,31 @@ let manager: UserManager | null = null;
 let currentUser: User | null = null;
 let initPromise: Promise<AuthMode> | null = null;
 
+/**
+ * Redirect loop breaker. A stale session, an iframe renew, or a token the API keeps rejecting could
+ * otherwise bounce the browser between the app and the Cognito Hosted UI forever ("just keeps
+ * refreshing"). Cap sign-in redirects within a short window; past the cap we stop redirecting and
+ * let the app render its auth error instead of looping.
+ */
+const REDIRECT_GUARD_KEY = "auth.redirects";
+function loopingSignin(): boolean {
+  const now = Date.now();
+  let rec = { n: 0, t: now };
+  try {
+    const raw = sessionStorage.getItem(REDIRECT_GUARD_KEY);
+    if (raw) rec = JSON.parse(raw);
+  } catch {
+    /* ignore malformed guard */
+  }
+  if (now - rec.t > 30_000) rec = { n: 0, t: now }; // window elapsed — reset
+  rec.n += 1;
+  sessionStorage.setItem(REDIRECT_GUARD_KEY, JSON.stringify(rec));
+  return rec.n > 3;
+}
+function clearSigninGuard(): void {
+  sessionStorage.removeItem(REDIRECT_GUARD_KEY);
+}
+
 /** Idempotent: concurrent callers (app shell + callback page) share one initialisation. */
 export function initAuth(): Promise<AuthMode> {
   if (!initPromise) {
@@ -57,7 +82,10 @@ async function doInit(): Promise<AuthMode> {
     response_type: "code",
     scope: "openid email profile",
     userStore: new WebStorageStateStore({ store: window.sessionStorage }),
-    automaticSilentRenew: true,
+    // NO automaticSilentRenew: it renews via a hidden iframe that loads the /auth/callback route,
+    // which this SPA can't service (it runs signinRedirectCallback + a full replace) and which
+    // loops. Expiry is handled by the global 401 handler (redirect — seamless via Cognito's cookie).
+    automaticSilentRenew: false,
   });
   manager.events.addUserLoaded((user) => {
     currentUser = user;
@@ -68,20 +96,39 @@ async function doInit(): Promise<AuthMode> {
   }
   currentUser = await manager.getUser();
   if (!currentUser || currentUser.expired) {
+    if (loopingSignin()) {
+      // Loop breaker: stop bouncing to the Hosted UI. The app renders with no identity and its
+      // own "couldn't load identity" notice, instead of an endless refresh.
+      return "cognito";
+    }
     await manager.signinRedirect({ state: window.location.pathname + window.location.search });
     return new Promise<AuthMode>(() => {}); // redirecting — freeze the app shell
   }
+  clearSigninGuard(); // authenticated — reset the loop guard
   return "cognito";
 }
 
-/** Called by the /auth/callback route. Returns the path the user originally asked for. */
-export async function completeLogin(): Promise<string> {
+/**
+ * Called by the /auth/callback route. Returns the path the user originally asked for.
+ * Memoised: the authorization code + state are single-use, so signinRedirectCallback() must run
+ * exactly once — a second call (StrictMode, a remount) would throw "No matching state in storage".
+ */
+let completion: Promise<string> | null = null;
+export function completeLogin(): Promise<string> {
+  if (!completion) {
+    completion = doCompleteLogin();
+  }
+  return completion;
+}
+
+async function doCompleteLogin(): Promise<string> {
   await initAuth(); // wait for the manager — the callback page mounts before init finishes
   if (!manager) {
     throw new Error("auth not initialised (dev-bypass mode has no callback)");
   }
   const user = await manager.signinRedirectCallback();
   currentUser = user;
+  clearSigninGuard(); // sign-in succeeded — reset the loop guard
   return typeof user.state === "string" && user.state.startsWith("/") ? user.state : "/";
 }
 
@@ -95,6 +142,9 @@ export function accessToken(): string | null {
  */
 export function handleUnauthorized(): void {
   if (config.authMode === "cognito" && manager) {
+    if (loopingSignin()) {
+      return; // loop breaker: the API keeps 401ing — don't bounce to the Hosted UI forever
+    }
     manager.signinRedirect({ state: window.location.pathname + window.location.search }).catch(() => {
       window.location.href = "/"; // last resort: full reload restarts the auth gate
     });
