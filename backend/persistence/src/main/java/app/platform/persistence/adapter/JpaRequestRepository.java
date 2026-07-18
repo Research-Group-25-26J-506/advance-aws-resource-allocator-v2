@@ -95,6 +95,7 @@ public class JpaRequestRepository implements RequestRepository {
                     r.resourceName(),
                     r.status().name(),
                     mapper.writeValueAsString(r.formData()),
+                    r.customTags().isEmpty() ? null : mapper.writeValueAsString(r.customTags()),
                     r.idempotencyKey(),
                     r.stackId(),
                     r.failureReason(),
@@ -111,6 +112,14 @@ public class JpaRequestRepository implements RequestRepository {
         } catch (JsonProcessingException ex) {
             throw new IllegalStateException("corrupt form_data_json for request " + e.getId(), ex);
         }
+        Map<String, String> customTags = Map.of();
+        if (e.getCustomTagsJson() != null && !e.getCustomTagsJson().isBlank()) {
+            try {
+                customTags = mapper.readValue(e.getCustomTagsJson(), new TypeReference<>() {});
+            } catch (JsonProcessingException ex) {
+                throw new IllegalStateException("corrupt custom_tags_json for request " + e.getId(), ex);
+            }
+        }
         Request request = new Request(
                 e.getId(),
                 e.getTemplateVersionId(),
@@ -122,6 +131,7 @@ public class JpaRequestRepository implements RequestRepository {
                 e.getRegion(),
                 e.getResourceName(),
                 formData,
+                customTags,
                 e.getIdempotencyKey(),
                 e.getSubmittedAt(),
                 RequestStatus.valueOf(e.getStatus()));

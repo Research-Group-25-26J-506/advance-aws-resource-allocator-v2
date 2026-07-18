@@ -67,6 +67,7 @@ public class RequestController {
                 payload.region(),
                 payload.resourceName(),
                 payload.configuration(),
+                payload.tags(),
                 idempotencyKey);
         // Long-running work never blocks HTTP threads: 202 + Location, progress via SSE (3.01)
         return ResponseEntity.accepted()

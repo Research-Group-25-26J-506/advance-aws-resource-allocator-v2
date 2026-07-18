@@ -19,7 +19,10 @@ public final class RequestDtos {
             @NotBlank @Pattern(regexp = "^[a-z]{2}-[a-z]+-\\d$") String region,
             @NotBlank @Pattern(regexp = "^[a-z][a-z0-9-]{2,62}$") String resourceName,
             String description,
-            @NotNull Map<String, Object> configuration) {}
+            @NotNull Map<String, Object> configuration,
+            // Optional user-supplied tags (TagEditor). Merged with the mandatory tags server-side;
+            // mandatory tags always win, so this can never override Owner/CostCenter/Environment/etc.
+            Map<String, String> tags) {}
 
     public record RequestDto(
             UUID id,

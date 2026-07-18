@@ -14,6 +14,7 @@ import Input from "@cloudscape-design/components/input";
 import Select from "@cloudscape-design/components/select";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import Spinner from "@cloudscape-design/components/spinner";
+import TagEditor, { TagEditorProps } from "@cloudscape-design/components/tag-editor";
 import Textarea from "@cloudscape-design/components/textarea";
 import Toggle from "@cloudscape-design/components/toggle";
 import Wizard from "@cloudscape-design/components/wizard";
@@ -38,6 +39,46 @@ interface FormSchema {
   properties?: Record<string, SchemaProperty>;
   required?: string[];
 }
+
+/** Cloudscape TagEditor needs a full i18n string set; kept module-level so it isn't recreated. */
+const TAG_EDITOR_I18N: TagEditorProps.I18nStrings = {
+  keyHeader: "Key",
+  valueHeader: "Value",
+  addButton: "Add tag",
+  removeButton: "Remove",
+  removeButtonAriaLabel: (tag) => `Remove ${tag.key}`,
+  undoButton: "Undo",
+  undoPrompt: "This tag will be removed",
+  loading: "Loading tags",
+  keyPlaceholder: "Enter key",
+  valuePlaceholder: "Enter value",
+  emptyTags: "No additional tags. Mandatory tags above are always applied.",
+  tooManyKeysSuggestion: "You have more keys than can be displayed",
+  tooManyValuesSuggestion: "You have more values than can be displayed",
+  keysSuggestionLoading: "Loading keys",
+  keysSuggestionError: "Keys could not be retrieved",
+  valuesSuggestionLoading: "Loading values",
+  valuesSuggestionError: "Values could not be retrieved",
+  emptyKeyError: "You must specify a tag key",
+  maxKeyCharLengthError: "The maximum number of characters in a tag key is 128.",
+  maxValueCharLengthError: "The maximum number of characters in a tag value is 256.",
+  duplicateKeyError: "You must specify a unique tag key.",
+  invalidKeyError: "Invalid key. Keys can only contain letters, numbers, spaces and + - = . _ : / @",
+  invalidValueError: "Invalid value. Values can only contain letters, numbers, spaces and + - = . _ : / @",
+  awsPrefixError: "Cannot start with aws:",
+  tagLimit: (available, limit) =>
+    available === limit
+      ? `You can add up to ${limit} tags.`
+      : available === 1
+        ? "You can add up to 1 more tag."
+        : `You can add up to ${available} more tags.`,
+  tagLimitReached: (limit) =>
+    limit === 1 ? "You have reached the limit of 1 tag." : `You have reached the limit of ${limit} tags.`,
+  tagLimitExceeded: (limit) =>
+    limit === 1 ? "You have exceeded the limit of 1 tag." : `You have exceeded the limit of ${limit} tags.`,
+  enteredKeyLabel: (key) => `Use "${key}"`,
+  enteredValueLabel: (value) => `Use "${value}"`,
+};
 
 /**
  * Dynamic Create Resource Wizard (2.04): renders any template's JSON Schema (draft-07 subset,
@@ -66,6 +107,8 @@ export default function CreateResourceWizard({ templateOverride }: { templateOve
   const [description, setDescription] = useState("");
   // Configuration (schema-driven)
   const [config, setConfig] = useState<Record<string, unknown>>({});
+  // Tags (optional, user-supplied — mandatory tags are added server-side)
+  const [customTags, setCustomTags] = useState<TagEditorProps.Tag[]>([]);
   // Review
   const [confirmed, setConfirmed] = useState(false);
 
@@ -84,6 +127,7 @@ export default function CreateResourceWizard({ templateOverride }: { templateOve
         setEnvironment(draft.environment ?? "DEV");
         setRegion(draft.region ?? "us-east-1");
         setConfig(draft.config ?? {});
+        setCustomTags(draft.customTags ?? []);
       } else {
         // Seed defaults from the schema
         const schema: FormSchema = JSON.parse(d.schema);
@@ -118,9 +162,12 @@ export default function CreateResourceWizard({ templateOverride }: { templateOve
 
   useEffect(() => {
     if (draftKey) {
-      sessionStorage.setItem(draftKey, JSON.stringify({ resourceName, environment, region, config }));
+      sessionStorage.setItem(
+        draftKey,
+        JSON.stringify({ resourceName, environment, region, config, customTags }),
+      );
     }
-  }, [draftKey, resourceName, environment, region, config]);
+  }, [draftKey, resourceName, environment, region, config, customTags]);
 
   const schema: FormSchema | null = useMemo(() => (detail ? JSON.parse(detail.schema) : null), [detail]);
 
@@ -160,6 +207,11 @@ export default function CreateResourceWizard({ templateOverride }: { templateOve
     setSubmitting(true);
     setError(null);
     try {
+      const tags = Object.fromEntries(
+        customTags
+          .filter((t) => !t.markedForRemoval && t.key.trim() !== "")
+          .map((t) => [t.key.trim(), (t.value ?? "").trim()]),
+      );
       const created = await api.createRequest(
         {
           templateId: detail.template.id,
@@ -168,6 +220,7 @@ export default function CreateResourceWizard({ templateOverride }: { templateOve
           resourceName,
           description: description || undefined,
           configuration: config,
+          tags: Object.keys(tags).length ? tags : undefined,
         },
         idempotencyKey.current,
       );
@@ -337,30 +390,49 @@ export default function CreateResourceWizard({ templateOverride }: { templateOve
           {
             title: "Tags",
             content: (
-              <Container>
-                <ColumnLayout columns={2} variant="text-grid">
-                  <div>
-                    <Box variant="awsui-key-label">Owner</Box>
-                    <Box>derived from your login</Box>
-                  </div>
-                  <div>
-                    <Box variant="awsui-key-label">CostCenter</Box>
-                    <Box>derived from your team</Box>
-                  </div>
-                  <div>
-                    <Box variant="awsui-key-label">Environment</Box>
-                    <Box>{environment}</Box>
-                  </div>
-                  <div>
-                    <Box variant="awsui-key-label">ManagedBy</Box>
-                    <Box>Platform</Box>
-                  </div>
-                </ColumnLayout>
-                <Box padding={{ top: "m" }} color="text-status-inactive">
-                  Mandatory tags are computed server-side and cannot be overridden. Additional tags land with
-                  the TagEditor in a later iteration.
-                </Box>
-              </Container>
+              <SpaceBetween size="l">
+                <Container header={<Header variant="h2">Mandatory tags</Header>}>
+                  <ColumnLayout columns={2} variant="text-grid">
+                    <div>
+                      <Box variant="awsui-key-label">Owner</Box>
+                      <Box>derived from your login</Box>
+                    </div>
+                    <div>
+                      <Box variant="awsui-key-label">CostCenter</Box>
+                      <Box>derived from your team</Box>
+                    </div>
+                    <div>
+                      <Box variant="awsui-key-label">Environment</Box>
+                      <Box>{environment}</Box>
+                    </div>
+                    <div>
+                      <Box variant="awsui-key-label">ManagedBy</Box>
+                      <Box>Platform</Box>
+                    </div>
+                  </ColumnLayout>
+                  <Box padding={{ top: "m" }} color="text-status-inactive">
+                    Computed server-side from your identity, team, and this request (also Application,
+                    PlatformRequestId, SourceCommitSha). They cannot be overridden.
+                  </Box>
+                </Container>
+                <Container
+                  header={
+                    <Header
+                      variant="h2"
+                      description="Optional key/value tags applied to this resource. A mandatory tag with the same key always wins."
+                    >
+                      Additional tags
+                    </Header>
+                  }
+                >
+                  <TagEditor
+                    i18nStrings={TAG_EDITOR_I18N}
+                    tags={customTags}
+                    tagLimit={40}
+                    onChange={({ detail }) => setCustomTags(detail.tags)}
+                  />
+                </Container>
+              </SpaceBetween>
             ),
           },
           {
