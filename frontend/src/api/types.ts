@@ -70,6 +70,16 @@ export interface TemplateSync {
   completedAt?: string | null;
 }
 
+export interface BuildRun {
+  id: string;
+  serviceName: string;
+  repo: string;
+  ref: string;
+  imageTag: string;
+  status: string;
+  startedAt: string;
+}
+
 export interface AuditEntry {
   actorId: string;
   action: string;

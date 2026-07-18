@@ -1,0 +1,77 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  EKS runtime (the ArgoCD→EKS target). Serverless: Fargate profiles run pods, so there are NO
+  EC2 nodes to manage or pay for idle — you pay the EKS control plane (~$0.10/hr ≈ $73/mo) plus
+  per-pod Fargate. Deploy this once when you want the EKS runtime; the platform's eks-deployer
+  (CodeBuild + kubectl) applies workload manifests to it. Reuses the platform VPC/subnets via SSM.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [dev, stg, prod]
+  AppSubnetsParam:
+    Type: AWS::SSM::Parameter::Value<List<String>>
+    Default: /platform/dev/network/app-subnets
+
+Resources:
+  ClusterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-${EnvironmentName}-eks-cluster-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: eks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+
+  Cluster:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Sub platform-eks-${EnvironmentName}
+      Version: "1.31"
+      RoleArn: !GetAtt ClusterRole.Arn
+      ResourcesVpcConfig:
+        SubnetIds: !Ref AppSubnetsParam
+        EndpointPublicAccess: true
+        EndpointPrivateAccess: true
+      AccessConfig:
+        AuthenticationMode: API_AND_CONFIG_MAP
+
+  PodExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-${EnvironmentName}-eks-pod-exec
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: eks-fargate-pods.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSFargatePodExecutionRolePolicy
+
+  FargateProfile:
+    Type: AWS::EKS::FargateProfile
+    Properties:
+      ClusterName: !Ref Cluster
+      FargateProfileName: default
+      PodExecutionRoleArn: !GetAtt PodExecutionRole.Arn
+      Subnets: !Ref AppSubnetsParam
+      Selectors:
+        - { Namespace: default }
+        - { Namespace: kube-system }
+        - { Namespace: platform-apps }
+
+  SsmClusterName:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /platform/${EnvironmentName}/eks/cluster-name
+      Type: String
+      Value: !Ref Cluster
+
+Outputs:
+  ClusterName: { Value: !Ref Cluster }
+  ClusterEndpoint: { Value: !GetAtt Cluster.Endpoint }

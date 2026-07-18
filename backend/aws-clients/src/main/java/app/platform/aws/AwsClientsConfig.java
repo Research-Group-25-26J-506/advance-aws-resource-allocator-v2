@@ -10,6 +10,8 @@ import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.awscore.client.builder.AwsClientBuilder;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.cloudformation.CloudFormationClient;
+import software.amazon.awssdk.services.cloudwatchlogs.CloudWatchLogsClient;
+import software.amazon.awssdk.services.codebuild.CodeBuildClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.sqs.SqsClient;
@@ -74,5 +76,15 @@ public class AwsClientsConfig {
     @Bean
     public SsmClient ssmClient() {
         return SsmClient.builder().applyMutation(common()).build();
+    }
+
+    @Bean
+    public CloudWatchLogsClient cloudWatchLogsClient() {
+        return CloudWatchLogsClient.builder().applyMutation(common()).build();
+    }
+
+    @Bean
+    public CodeBuildClient codeBuildClient() {
+        return CodeBuildClient.builder().applyMutation(common()).build();
     }
 }

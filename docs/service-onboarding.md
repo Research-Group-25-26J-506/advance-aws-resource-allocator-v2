@@ -74,11 +74,130 @@ networking.
 - PROD stays out of scope this iteration; when it lands it inherits the approvals gate and
   adds the hardening pass (change windows, canary option).
 
+## 4. How ECS deployment works TODAY (and where it's going)
+
+**Today — image-in, wizard-driven.** An ECS service is a CloudFormation template
+(`templates/ecs-service/`) provisioned through the normal request pipeline:
+
+```
+wizard/config params → TemplateRenderer maps them to CFN parameters
+  (image, port, cpu, memory, attachAlb, albPath, forwardLogsToS3)
+  + worker injects Environment
+→ worker STS-assumes the exec role → CreateStack
+→ CFN builds: TaskDefinition + ExecutionRole + Service (+ TargetGroup + ListenerRule
+  if attachAlb) (+ Firehose + subscription if forwardLogsToS3)
+→ ECS pulls the image from ECR/registry and runs it in the private app subnets
+```
+
+You give it an **image URI** and it runs. VPC, subnets, cluster, and security groups are
+**resolved from SSM** (`/platform/{env}/network/*`, `/ecs-cluster`) — they must already exist
+(they do: the platform stacks created them). The template never creates a VPC; it *consumes*
+the platform's.
+
+**Try it:** catalog → ECS Service → name `hello-web`, image `public.ecr.aws/nginx/nginx:1.27-alpine`,
+port 80, attachAlb=true, path `/hello/*`, priority 300 → the ServiceUrl output is your live URL.
+
+**Where it's going — config-in, git-driven (the target).** Instead of an image URI, the service
+declares a **git repo**; the platform builds the image itself. The onboarding artifact becomes:
+
+```yaml
+# .platform/service.yaml in the service repo
+service: orders-api
+group: pastry-plus
+repo: https://github.com/Research-Group-25-26J-506/orders-api   # org must match allowlist
+environments: [dev, qa]                                          # visualized as a pipeline
+
+deployment:
+  type: service
+  port: 8080
+  healthCheckPath: /healthz
+
+infrastructure:            # ensure-exists; the "next" preview surfaces the RESOLVED values
+  vpc: default             # -> resolves to vpc-0abc... (shown before submit)
+  subnets: private         # -> subnet-0a.., subnet-0b.. (shown)
+  alb: { attach: true, path: /orders/* }
+  logs: { destination: s3 }
+
+build:
+  dockerfile: ./Dockerfile
+```
+
+Design rules for this path:
+- **Org allowlist**: `repo` must belong to an approved GitHub org (checked dynamically against a
+  configurable allowlist, e.g. `Research-Group-25-26J-506`), else onboarding is rejected — no
+  building arbitrary repos.
+- **Config preview on "Next"**: before submit, the wizard shows the *resolved* infrastructure —
+  the actual VPC id, subnet ids, ALB, exec role that will be used — so the chosen configuration
+  is explicit and reviewable (your "note down the VPC and subnets" ask). Mandatory pieces
+  (VPC/subnets present, task definition, exec role, ALB when `attach`) are validated at this
+  step and block submit if unresolvable.
+- **Build then deploy**: GitHub App webhook → CodeBuild builds the Dockerfile → pushes to ECR →
+  the platform provisions/updates the ecs-service with that image. App change = rebuild+roll;
+  infra change = stack update (§ change detection above).
+
+## Source-to-image: LIVE (the platform builds images itself)
+
+`infrastructure/platform/codebuild.yaml` deploys a CodeBuild project the platform triggers with
+per-build overrides (repo URL, ref, image tag, Dockerfile). It clones the repo, `docker build`s,
+and pushes to ECR — **on AWS, not on anyone's laptop**. Proven end-to-end:
+`Research-Group-25-26J-506/pastry-orders-api` → CodeBuild → ECR (`pastry-orders-api-v1`) →
+ecs-service on the cluster, ALB `/orders/*`, logs streaming — zero local Docker.
+
+- **Build from repo** page + `POST /api/v1/builds` (org allowlist enforced) → StartBuild →
+  status tracked (CodeBuild polled). `GET /apps` + Service Logs page tail any service's logs.
+- Org allowlist: `platform.build.allowed-orgs` (default `Research-Group-25-26J-506`).
+- Next: auto-deploy on build success (build → deploy the ecs-service with the produced tag in
+  one flow); GitHub App webhook so a push triggers it; buildpack option (no Dockerfile).
+
+## Revamp roadmap — full ECS + EKS + visualization
+
+The platform now matches PaaStry's build+registry layer on AWS-native services. Remaining to
+reach parity + the "Figma-board" experience:
+
+| PaaStry | Here — status |
+| --- | --- |
+| Concourse auto-pipelines | CodeBuild source-to-image ✅ (webhook auto-trigger 🔜) |
+| Harbor | ECR ✅ |
+| Sonarqube/Veracode scans | Trivy in CI ✅; SAST 🔜 |
+| ArgoCD GitOps → **EKS** | ECS deploy ✅; **EKS runtime 🔜** (see below) |
+| Canary rollouts | ECS circuit breaker ✅; CodeDeploy canary 🔜 |
+
+**EKS support — infrastructure READY (opt-in, ~$73/mo control plane).** Two templates ship:
+- `infrastructure/platform/eks-cluster.yaml` — a **serverless** EKS cluster (Fargate profiles,
+  no EC2 nodes to pay for idle), reusing the platform VPC/subnets. Deploy once when you want the
+  runtime: `aws cloudformation deploy --stack-name platform-eks-dev --template-file
+  infrastructure/platform/eks-cluster.yaml --capabilities CAPABILITY_NAMED_IAM
+  --parameter-overrides EnvironmentName=dev`.
+- `infrastructure/platform/eks-deployer.yaml` — since K8s manifests aren't a CloudFormation
+  resource type, EKS workloads deploy via a **CodeBuild project running `kubectl apply`** (the
+  ArgoCD-apply equivalent), granted cluster-admin via an EKS access entry.
+
+**EKS deploy flow.** `deployment.runtime: ecs | eks` in service.yaml selects the path. For `eks`:
+build stays identical (image → ECR via the image-builder); the platform renders
+`templates/eks-service/manifest.yaml.tmpl` (Deployment + Service) with the service's values,
+base64-encodes it, and triggers the eks-deployer with `MANIFEST_B64` → `kubectl apply`. Job and
+CronJob shapes render native K8s `Job`/`CronJob` (the Asset Transfer / List Synchronizer
+workloads land cleanly). The request pipeline, approvals, promotion, groups, topology all stay —
+only the deploy backend branches on runtime. Backend wiring (render + trigger + status) is the
+next build item; the infrastructure and manifest template are in place.
+
+**Service topology visualization (the Figma-board view).** A React diagram per group/service
+showing: repo → build → image → the deployed resources (service, task def, ALB rule, DB, queue)
+× environment, as a live board (react-flow or mermaid). Nodes are clickable → the request /
+logs / outputs. This makes "what is present" visible at a glance — the group env-chip rows are
+the text version; the board is the visual one.
+
 ## Build order for the next iteration
 
-1. `vpc-network` + `alb-attach` + `logs-to-s3` catalog templates (the ensure-exists targets)
-2. Group column on requests (explicit `group` distinct from resource name) + group-aware wizard ✅ (name-keyed version live)
-3. `service.yaml` reader: repo webhook/scan → diff → the change-detection actions above
-4. GitHub App + CodeBuild for the build-image-on-app-change path
-5. Group page pipeline visualization with inline promote
-6. PROD iteration: approvals + canary + change windows
+1. **`vpc-network` template** — provision a VPC + public/private subnets for accounts that need
+   more than the platform default (the ensure-exists fallback target).
+2. **`service.yaml` reader + config preview** — parse the repo config, resolve infra from SSM,
+   show the resolved VPC/subnets/roles on wizard "Next", validate mandatory pieces.
+3. **Org allowlist** check on `repo`.
+4. **GitHub App + CodeBuild** — build the image from the repo so `repo:` replaces `image:`.
+5. Group page pipeline visualization with inline promote; reconciliation sweep for stuck requests.
+6. PROD iteration: approvals + canary + change windows.
+
+Done in the current iteration: resource groups (create → attach → cascade delete → restore),
+env-suffixed names, dynamic env chain, promotion, ecs-service with ALB + logs-to-S3,
+ecs-scheduled-task, rds placement + connection outputs.

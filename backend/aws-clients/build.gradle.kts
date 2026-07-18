@@ -10,4 +10,6 @@ dependencies {
     api(libs.aws.cloudformation)
     api(libs.aws.sts)
     api(libs.aws.ssm)
+    api(libs.aws.cloudwatchlogs)
+    api(libs.aws.codebuild)
 }

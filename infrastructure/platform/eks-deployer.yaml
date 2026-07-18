@@ -1,0 +1,88 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  EKS deploy mechanism. K8s manifests aren't a CloudFormation resource type, so EKS workloads
+  deploy via this CodeBuild project running `kubectl apply` (the platform's ArgoCD-apply
+  equivalent). The platform triggers it with a rendered manifest + image; it applies to the
+  cluster. Deploy AFTER eks-cluster.yaml. Grant its role EKS access via an access entry.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [dev, stg, prod]
+
+Resources:
+  DeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-${EnvironmentName}-eks-deployer
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: deploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Logs
+                Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents, logs:CreateLogGroup]
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/platform/${EnvironmentName}/eks-deploy:*
+              - Sid: EksDescribe
+                Effect: Allow
+                Action: [eks:DescribeCluster]
+                Resource: !Sub arn:aws:eks:${AWS::Region}:${AWS::AccountId}:cluster/platform-eks-${EnvironmentName}
+
+  # The deployer role must be a cluster admin to apply manifests
+  DeployerAccess:
+    Type: AWS::EKS::AccessEntry
+    Properties:
+      ClusterName: !Sub platform-eks-${EnvironmentName}
+      PrincipalArn: !GetAtt DeployerRole.Arn
+      AccessPolicies:
+        - PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+          AccessScope: { Type: cluster }
+
+  DeployLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /platform/${EnvironmentName}/eks-deploy
+      RetentionInDays: 30
+
+  Deployer:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub platform-${EnvironmentName}-eks-deployer
+      ServiceRole: !GetAtt DeployerRole.Arn
+      TimeoutInMinutes: 15
+      Artifacts: { Type: NO_ARTIFACTS }
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        EnvironmentVariables:
+          - { Name: CLUSTER, Value: !Sub "platform-eks-${EnvironmentName}" }
+          - { Name: MANIFEST_B64, Value: "" }   # base64 K8s manifest, overridden per deploy
+      LogsConfig:
+        CloudWatchLogs: { GroupName: !Sub "/platform/${EnvironmentName}/eks-deploy", Status: ENABLED }
+      Source:
+        Type: NO_SOURCE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              commands:
+                - curl -sLO "https://dl.k8s.io/release/v1.31.0/bin/linux/amd64/kubectl"
+                - chmod +x kubectl && mv kubectl /usr/local/bin/
+            build:
+              commands:
+                - aws eks update-kubeconfig --name "$CLUSTER" --region "$AWS_DEFAULT_REGION"
+                - echo "$MANIFEST_B64" | base64 -d > manifest.yaml
+                - cat manifest.yaml
+                - kubectl apply -f manifest.yaml
+                - kubectl get deploy,svc -n platform-apps || true
+
+Outputs:
+  DeployerProject: { Value: !Ref Deployer }

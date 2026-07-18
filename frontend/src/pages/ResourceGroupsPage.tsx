@@ -53,6 +53,22 @@ export default function ResourceGroupsPage() {
     }
   };
 
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const groupAction = async (name: string, action: "delete" | "restore") => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (action === "delete") await api.deleteGroup(name);
+      else await api.restoreGroup(name);
+      setConfirmDelete(null);
+      refresh();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const groups = useMemo(() => {
     const byName = new Map<string, Map<string, Map<string, PlatformRequest>>>();
     // declared-but-empty groups appear first-class, ready to receive resources
@@ -116,9 +132,17 @@ export default function ResourceGroupsPage() {
                 variant="h2"
                 counter={`(${templates.size} resource${templates.size > 1 ? "s" : ""})`}
                 actions={
-                  <Button onClick={() => navigate(`/catalog?group=${encodeURIComponent(name)}`)}>
-                    Provision in this group
-                  </Button>
+                  <SpaceBetween direction="horizontal" size="xs">
+                    <Button onClick={() => navigate(`/catalog?group=${encodeURIComponent(name)}`)}>
+                      Provision in this group
+                    </Button>
+                    <Button onClick={() => groupAction(name, "restore")} loading={busy}>
+                      Restore
+                    </Button>
+                    <Button onClick={() => setConfirmDelete(name)} loading={busy}>
+                      Delete all
+                    </Button>
+                  </SpaceBetween>
                 }
               >
                 {name}
@@ -159,6 +183,27 @@ export default function ResourceGroupsPage() {
           </Container>
         ))}
       </SpaceBetween>
+
+      <Modal
+        visible={confirmDelete !== null}
+        onDismiss={() => setConfirmDelete(null)}
+        header={`Delete all resources in "${confirmDelete}"`}
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={() => setConfirmDelete(null)}>
+                Cancel
+              </Button>
+              <Button variant="primary" loading={busy} onClick={() => confirmDelete && groupAction(confirmDelete, "delete")}>
+                Delete all resources
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        This deletes every live resource in the group across all environments. You can bring them
+        back with Restore (re-provisions from saved configuration) while the request history remains.
+      </Modal>
 
       <Modal
         visible={createVisible}
