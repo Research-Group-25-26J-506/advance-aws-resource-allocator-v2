@@ -140,6 +140,16 @@ export default function CreateResourceWizard({ templateOverride }: { templateOve
     }).catch((e) => setError(String(e)));
   }, [templateId]);
 
+  // "Deploy this image" from the Builds page prefills the image URI (and service name) via query
+  // params, on top of the seeded/restored config.
+  useEffect(() => {
+    const image = searchParams.get("image");
+    const svc = searchParams.get("serviceName");
+    if (!detail || (!image && !svc)) return;
+    setConfig((c) => ({ ...c, ...(image ? { image } : {}), ...(svc ? { serviceName: svc } : {}) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail]);
+
   useEffect(() => {
     // group preselection (?group=) + existing group suggestions for the name field
     const preset = searchParams.get("group");

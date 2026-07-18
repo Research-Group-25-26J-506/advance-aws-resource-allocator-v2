@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Alert from "@cloudscape-design/components/alert";
 import Box from "@cloudscape-design/components/box";
 import Button from "@cloudscape-design/components/button";
@@ -7,6 +8,7 @@ import ContentLayout from "@cloudscape-design/components/content-layout";
 import FormField from "@cloudscape-design/components/form-field";
 import Header from "@cloudscape-design/components/header";
 import Input from "@cloudscape-design/components/input";
+import Popover from "@cloudscape-design/components/popover";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import StatusIndicator from "@cloudscape-design/components/status-indicator";
 import Table from "@cloudscape-design/components/table";
@@ -19,6 +21,7 @@ import { relativeTime } from "../util/time";
  * to ECR - no local Docker. On success, deploy the service with the produced image tag.
  */
 export default function BuildsPage() {
+  const navigate = useNavigate();
   const [repo, setRepo] = useState("");
   const [ref, setRef] = useState("main");
   const [serviceName, setServiceName] = useState("");
@@ -104,13 +107,55 @@ export default function BuildsPage() {
             { id: "service", header: "Service", cell: (b) => b.serviceName },
             { id: "repo", header: "Repo", cell: (b) => b.repo.replace("https://github.com/", "") },
             { id: "ref", header: "Ref", cell: (b) => b.ref },
-            { id: "tag", header: "Image tag", cell: (b) => b.imageTag },
+            {
+              id: "image",
+              header: "Image URI",
+              cell: (b) => (
+                <SpaceBetween direction="horizontal" size="xs">
+                  <Box variant="code" fontSize="body-s">
+                    {b.imageUri}
+                  </Box>
+                  <Popover
+                    dismissButton={false}
+                    position="top"
+                    size="small"
+                    triggerType="custom"
+                    content="Copied to clipboard"
+                  >
+                    <Button
+                      iconName="copy"
+                      variant="inline-icon"
+                      ariaLabel="Copy image URI"
+                      onClick={() => navigator.clipboard?.writeText(b.imageUri)}
+                    />
+                  </Popover>
+                </SpaceBetween>
+              ),
+            },
             {
               id: "status",
               header: "Status",
               cell: (b) => <StatusIndicator type={statusType(b.status)}>{b.status}</StatusIndicator>,
             },
             { id: "started", header: "Started", cell: (b) => <span title={b.startedAt}>{relativeTime(b.startedAt)}</span> },
+            {
+              id: "actions",
+              header: "",
+              cell: (b) => (
+                <Button
+                  disabled={b.status !== "SUCCEEDED"}
+                  onClick={() =>
+                    navigate(
+                      `/deployments?image=${encodeURIComponent(b.imageUri)}&serviceName=${encodeURIComponent(
+                        b.serviceName,
+                      )}`,
+                    )
+                  }
+                >
+                  Deploy this image
+                </Button>
+              ),
+            },
           ]}
           empty={<Box textAlign="center" padding="l">No builds yet — trigger one above.</Box>}
         />

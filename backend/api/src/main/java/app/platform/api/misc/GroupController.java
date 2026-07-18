@@ -71,13 +71,19 @@ public class GroupController {
         return ResponseEntity.ok(Map.of("name", name));
     }
 
-    /** Cascade delete: delete every live resource in the group (each becomes a delete request). */
+    /**
+     * Cascade delete: delete every resource in the group (each becomes a delete request). This
+     * includes rolled-back / failed resources — a CREATE that rolled back still leaves a stack
+     * (ROLLBACK_COMPLETE) that must be torn down, so those states are deleted too, not just the
+     * cleanly-created ones. Every status listed here can legally transition to DELETE_IN_PROGRESS.
+     */
     @PostMapping("/{name}/delete")
     @PreAuthorize("hasAnyRole('USER','PLATFORM_ADMIN')")
     public ResponseEntity<Map<String, Object>> deleteAll(@PathVariable String name, Authentication auth) {
         List<byte[]> ids = jdbc.queryForList(
-                "SELECT id FROM requests WHERE resource_name = ?"
-                        + " AND status IN ('CREATE_COMPLETE','UPDATE_COMPLETE')",
+                "SELECT id FROM requests WHERE resource_name = ? AND status IN ("
+                        + "'CREATE_COMPLETE','UPDATE_COMPLETE','UPDATE_ROLLBACK_COMPLETE',"
+                        + "'CREATE_FAILED','ROLLBACK_COMPLETE','ROLLBACK_FAILED','UPDATE_FAILED','DELETE_FAILED')",
                 byte[].class, name);
         int deleted = 0;
         for (byte[] raw : ids) {
