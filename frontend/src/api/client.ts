@@ -82,6 +82,8 @@ export const api = {
   listGroups: () => call<{ name: string; description: string }[]>("GET", "/groups"),
   createGroup: (name: string, description: string) =>
     call<{ name: string }>("POST", "/groups", { name, description }, uuidv7()),
+  deleteGroup: (name: string) => call<{ deleted: number }>("POST", `/groups/${name}/delete`, undefined, uuidv7()),
+  restoreGroup: (name: string) => call<{ restored: number }>("POST", `/groups/${name}/restore`, undefined, uuidv7()),
   listAudit: () => call<AuditEntry[]>("GET", "/audit"),
   listRunbooks: () => call<Runbook[]>("GET", "/runbooks"),
   listApprovals: () => call<PendingApproval[]>("GET", "/approvals"),
