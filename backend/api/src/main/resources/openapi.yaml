@@ -156,6 +156,38 @@ paths:
               schema: { $ref: "#/components/schemas/Request" }
         "409": { $ref: "#/components/responses/Problem" }
 
+  /requests/{id}/image:
+    post:
+      tags: [requests]
+      operationId: updateRequestImage
+      summary: Roll a new container image onto an existing ecs-service in place
+      description: >-
+        In-place update: CloudFormation updates the existing stack and ECS rolls the tasks onto the
+        new image. No new resource is created; the request keeps its identity, stack and history and
+        moves to UPDATE_IN_PROGRESS. Only image-bearing (ecs) resources in a settled state are eligible.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image: { type: string, description: New container image URI }
+      responses:
+        "202":
+          description: Update accepted
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Request" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+
   /requests/{id}/cancel:
     post:
       tags: [requests]
