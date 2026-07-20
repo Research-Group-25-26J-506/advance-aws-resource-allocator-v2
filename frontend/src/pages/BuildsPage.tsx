@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Alert from "@cloudscape-design/components/alert";
 import Autosuggest from "@cloudscape-design/components/autosuggest";
@@ -10,6 +10,7 @@ import FormField from "@cloudscape-design/components/form-field";
 import Header from "@cloudscape-design/components/header";
 import Input from "@cloudscape-design/components/input";
 import Popover from "@cloudscape-design/components/popover";
+import Select from "@cloudscape-design/components/select";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import StatusIndicator from "@cloudscape-design/components/status-indicator";
 import Table from "@cloudscape-design/components/table";
@@ -31,6 +32,8 @@ export default function BuildsPage() {
   const [loadingBranches, setLoadingBranches] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [serviceFilter, setServiceFilter] = useState("__all__");
+  const [retryingId, setRetryingId] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     api.listBuilds().then(setBuilds).catch(() => setBuilds([]));
@@ -75,8 +78,28 @@ export default function BuildsPage() {
     }
   };
 
+  const retry = async (b: BuildRun) => {
+    setRetryingId(b.id);
+    setError(null);
+    try {
+      await api.triggerBuild(b.repo, b.ref, b.serviceName);
+      refresh();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRetryingId(null);
+    }
+  };
+
   const statusType = (s: string) =>
     s === "SUCCEEDED" ? "success" : s === "FAILED" ? "error" : "in-progress";
+
+  // Segregate by service: a filter over the distinct service names in the build history.
+  const services = useMemo(
+    () => [...new Set((builds ?? []).map((b) => b.serviceName))].sort(),
+    [builds],
+  );
+  const shown = (builds ?? []).filter((b) => serviceFilter === "__all__" || b.serviceName === serviceFilter);
 
   return (
     <ContentLayout
@@ -134,12 +157,31 @@ export default function BuildsPage() {
 
         <Table
           header={
-            <Header counter={builds ? `(${builds.length})` : undefined} actions={<Button iconName="refresh" onClick={refresh} ariaLabel="Refresh" />}>
+            <Header
+              counter={builds ? `(${shown.length})` : undefined}
+              actions={
+                <SpaceBetween direction="horizontal" size="xs">
+                  <Select
+                    selectedOption={{
+                      value: serviceFilter,
+                      label: serviceFilter === "__all__" ? "All services" : serviceFilter,
+                    }}
+                    options={[
+                      { value: "__all__", label: "All services" },
+                      ...services.map((s) => ({ value: s, label: s })),
+                    ]}
+                    onChange={(e) => setServiceFilter(e.detail.selectedOption.value ?? "__all__")}
+                    disabled={services.length === 0}
+                  />
+                  <Button iconName="refresh" onClick={refresh} ariaLabel="Refresh" />
+                </SpaceBetween>
+              }
+            >
               Builds
             </Header>
           }
           loading={builds === null}
-          items={builds ?? []}
+          items={shown}
           columnDefinitions={[
             { id: "service", header: "Service", cell: (b) => b.serviceName },
             { id: "repo", header: "Repo", cell: (b) => b.repo.replace("https://github.com/", "") },
@@ -179,18 +221,28 @@ export default function BuildsPage() {
               id: "actions",
               header: "",
               cell: (b) => (
-                <Button
-                  disabled={b.status !== "SUCCEEDED"}
-                  onClick={() =>
-                    navigate(
-                      `/deployments?image=${encodeURIComponent(b.imageUri)}&serviceName=${encodeURIComponent(
-                        b.serviceName,
-                      )}`,
-                    )
-                  }
-                >
-                  Deploy this image
-                </Button>
+                <SpaceBetween direction="horizontal" size="xs">
+                  <Button
+                    iconName="refresh"
+                    disabled={b.status === "IN_PROGRESS"}
+                    loading={retryingId === b.id}
+                    onClick={() => retry(b)}
+                  >
+                    Retry
+                  </Button>
+                  <Button
+                    disabled={b.status !== "SUCCEEDED"}
+                    onClick={() =>
+                      navigate(
+                        `/deployments?image=${encodeURIComponent(b.imageUri)}&serviceName=${encodeURIComponent(
+                          b.serviceName,
+                        )}`,
+                      )
+                    }
+                  >
+                    Deploy this image
+                  </Button>
+                </SpaceBetween>
               ),
             },
           ]}
