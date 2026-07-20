@@ -156,6 +156,19 @@ public class RequestController {
                 .body(RequestDto.from(promoted));
     }
 
+    /** In-place image update: roll a new container image onto the existing ecs-service stack. */
+    @PostMapping("/{id}/image")
+    @PreAuthorize("hasAnyRole('USER','PLATFORM_ADMIN')")
+    public ResponseEntity<RequestDto> updateImage(
+            @PathVariable UUID id,
+            @Valid @RequestBody RequestDtos.UpdateImagePayload payload,
+            Authentication auth) {
+        var updated = service.updateImage(auth.getName(), auth.getName(), id, payload.image());
+        return ResponseEntity.accepted()
+                .location(URI.create("/api/v1/requests/" + id))
+                .body(RequestDto.from(updated));
+    }
+
     @PostMapping("/{id}/retry")
     @PreAuthorize("hasAnyRole('USER','PLATFORM_ADMIN')")
     public ResponseEntity<RequestDto> retry(@PathVariable UUID id, Authentication auth) {

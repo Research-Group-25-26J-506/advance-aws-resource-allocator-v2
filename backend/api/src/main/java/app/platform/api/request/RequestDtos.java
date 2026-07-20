@@ -52,4 +52,7 @@ public final class RequestDtos {
     }
 
     public record RequestEventDto(String from, String to, String reason, String source, Instant occurredAt) {}
+
+    /** In-place image update payload — the new container image URI to roll onto the existing stack. */
+    public record UpdateImagePayload(@NotBlank String image) {}
 }

@@ -199,6 +199,7 @@ public class BuildsController {
                             .environmentVariablesOverride(
                                     EnvironmentVariable.builder().name("REPO_URL").value(repo).build(),
                                     EnvironmentVariable.builder().name("REPO_REF").value(ref).build(),
+                                    EnvironmentVariable.builder().name("SERVICE_NAME").value(serviceName).build(),
                                     EnvironmentVariable.builder().name("IMAGE_TAG").value(imageTag).build(),
                                     EnvironmentVariable.builder().name("ECR_REPO").value(repoName).build()))
                     .build()
@@ -267,20 +268,37 @@ public class BuildsController {
             return;
         }
         try {
-            var builds = codeBuild.batchGetBuilds(b -> b.ids(ids)).builds();
-            Map<String, String> statusById = builds.stream()
-                    .collect(Collectors.toMap(bd -> bd.id(), bd -> mapStatus(bd.buildStatusAsString())));
+            var byId = codeBuild.batchGetBuilds(b -> b.ids(ids)).builds().stream()
+                    .collect(Collectors.toMap(bd -> bd.id(), bd -> bd));
             for (Map<String, Object> row : rows) {
-                String cbId = (String) row.get("codebuildId");
-                String fresh = cbId == null ? null : statusById.get(cbId);
-                if (fresh != null && !fresh.equals(row.get("status"))) {
-                    boolean terminal = !"IN_PROGRESS".equals(fresh);
-                    jdbc.update(
-                            "UPDATE builds SET status = ?, completed_at = " + (terminal ? "NOW(6)" : "completed_at")
-                                    + " WHERE id = UUID_TO_BIN(?)",
-                            fresh, (String) row.get("id"));
-                    row.put("status", fresh);
+                var bd = byId.get((String) row.get("codebuildId"));
+                if (bd == null) {
+                    continue;
                 }
+                String fresh = mapStatus(bd.buildStatusAsString());
+                // The build tags the image with the real commit SHA and exports it back here; adopt
+                // it so the recorded image tag/URI is the actual pushed image, not the initial id.
+                String exportedTag = bd.exportedEnvironmentVariables().stream()
+                        .filter(e -> "IMAGE_TAG".equals(e.name()))
+                        .map(e -> e.value())
+                        .findFirst()
+                        .orElse(null);
+                boolean statusChanged = !fresh.equals(row.get("status"));
+                boolean tagChanged = exportedTag != null && !exportedTag.equals(row.get("imageTag"));
+                if (!statusChanged && !tagChanged) {
+                    continue;
+                }
+                String completed = "IN_PROGRESS".equals(fresh) ? "completed_at" : "NOW(6)";
+                if (tagChanged) {
+                    jdbc.update("UPDATE builds SET status = ?, image_tag = ?, completed_at = " + completed
+                            + " WHERE id = UUID_TO_BIN(?)", fresh, exportedTag, (String) row.get("id"));
+                    row.put("imageTag", exportedTag);
+                    row.put("imageUri", imageUri((String) row.get("serviceName"), exportedTag));
+                } else {
+                    jdbc.update("UPDATE builds SET status = ?, completed_at = " + completed
+                            + " WHERE id = UUID_TO_BIN(?)", fresh, (String) row.get("id"));
+                }
+                row.put("status", fresh);
             }
         } catch (Exception e) {
             log.warn("Could not refresh build statuses: {}", e.getMessage());

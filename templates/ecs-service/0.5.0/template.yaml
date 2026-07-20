@@ -56,7 +56,9 @@ Parameters:
     Default: 100
     MinValue: 1
     MaxValue: 50000
-    Description: Unique listener rule priority - each ALB-attached service needs a distinct number
+    Description: >-
+      Listener rule priority - INJECTED by the platform (a stable value unique per service+env) so
+      promoting the same service to another environment never collides on the shared ALB.
   HealthCheckPath:
     Type: String
     Default: /
@@ -144,9 +146,11 @@ Resources:
         - Field: path-pattern
           PathPatternConfig:
             Values:
+              # Default: env-scoped so the same service in DEV/QA/STG/PROD each gets a distinct path
+              # (e.g. /dev/order-service/*, /qa/order-service/*) and both stay reachable.
               - !If
                 - DefaultAlbPath
-                - !Sub "/${ServiceName}/*"
+                - !Sub "/${Environment}/${ServiceName}/*"
                 - !Ref AlbPath
       Actions:
         - { Type: forward, TargetGroupArn: !Ref TargetGroup }
@@ -242,6 +246,9 @@ Resources:
 
 Outputs:
   ServiceArn: { Value: !Ref Service }
+  Image:
+    Description: The container image this service is running
+    Value: !Ref Image
   Cluster:
     Description: The ECS cluster this service runs on
     Value: !If [HasGroupCluster, !Ref ClusterName, "{{resolve:ssm:/platform/dev/ecs-cluster}}"]
@@ -251,7 +258,7 @@ Outputs:
       - "https://{{resolve:ssm:/platform/dev/cdn-domain}}${Path}"
       - Path: !If
           - DefaultAlbPath
-          - !Sub "/${ServiceName}/"
+          - !Sub "/${Environment}/${ServiceName}/"
           - !Ref AlbPath
   LogGroupName: { Value: !Ref LogGroup }
   LogsBucketPrefix:

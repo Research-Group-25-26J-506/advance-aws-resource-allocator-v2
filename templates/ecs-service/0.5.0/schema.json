@@ -52,15 +52,7 @@
       "type": "string",
       "title": "ALB path pattern",
       "default": "/",
-      "x-help": "e.g. /orders/*. Leave as / and it's served at /<serviceName>/* so it never collides with the platform UI at the root."
-    },
-    "albPriority": {
-      "type": "integer",
-      "title": "ALB rule priority",
-      "minimum": 1,
-      "maximum": 50000,
-      "default": 100,
-      "x-help": "Unique per ALB-attached service; pick a distinct number."
+      "x-help": "e.g. /orders/*. Leave as / and it's served at /<env>/<serviceName>/* — env-scoped so promotions don't collide, and it never claims the platform root."
     },
     "healthCheckPath": {
       "type": "string",

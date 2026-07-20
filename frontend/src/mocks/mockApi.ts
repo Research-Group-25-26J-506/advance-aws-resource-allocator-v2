@@ -96,6 +96,16 @@ const requests: PlatformRequest[] = [
     requesterEmail: "dev@local",
     submittedAt: new Date(Date.now() - 120e3).toISOString(),
   },
+  {
+    id: "0190a1b2-7d3e-7000-8000-3fb1c0ffee02",
+    templateId: "ecs-service",
+    environment: "DEV",
+    region: "us-east-1",
+    resourceName: "pastry-orders-api",
+    status: "CREATE_COMPLETE",
+    requesterEmail: "dev@local",
+    submittedAt: new Date(Date.now() - 5400e3).toISOString(),
+  },
 ];
 
 const events: RequestEvent[] = [
@@ -137,6 +147,19 @@ export async function mockHandler(method: string, path: string, body?: unknown):
     };
     requests.unshift(created);
     return created;
+  }
+  if (method === "POST" && path.match(/^\/requests\/[^/]+\/image$/)) {
+    const id = path.split("/")[2];
+    const req = requests.find((r) => r.id === id) ?? requests[0];
+    req.status = "UPDATE_IN_PROGRESS";
+    return req;
+  }
+  if (path.match(/^\/requests\/[^/]+\/outputs$/)) {
+    const id = path.split("/")[2];
+    const req = requests.find((r) => r.id === id);
+    return req?.templateId === "ecs-service"
+      ? [{ key: "Image", value: "111122223333.dkr.ecr.us-east-1.amazonaws.com/platform-images-dev:pastry-orders-api-9f7a12b3" }]
+      : [];
   }
   if (path.match(/^\/requests\/[^/]+\/events$/)) return events;
   if (path.match(/^\/requests\/[^/]+$/)) {

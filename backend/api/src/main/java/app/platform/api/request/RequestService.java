@@ -166,6 +166,52 @@ public class RequestService {
         return promoted;
     }
 
+    /**
+     * In-place image update: rolls a new container image onto the existing stack (CFN update-stack,
+     * ECS rolls the tasks) rather than creating a duplicate resource. The request keeps its identity,
+     * stack and history; only the image changes and the lifecycle moves *_COMPLETE -> UPDATE_IN_PROGRESS.
+     * A fresh idempotency key rides the message so CFN dedupes THIS update, not the original create.
+     */
+    @Transactional
+    public Request updateImage(String actorId, String actorEmail, UUID id, String newImage) {
+        Request source = get(id);
+        if (!source.formData().containsKey("image")) {
+            throw new app.platform.domain.error.NotUpdatableException(source.templateId());
+        }
+        RequestStatus from = source.status();
+        // Carry every field forward, swapping only the image, then re-validate the transition.
+        java.util.Map<String, Object> newForm = new java.util.HashMap<>(source.formData());
+        newForm.put("image", newImage);
+        Request updated = new Request(
+                source.id(),
+                source.templateVersionId(),
+                source.templateId(),
+                source.requesterId(),
+                source.requesterEmail(),
+                source.teamId(),
+                source.environment(),
+                source.region(),
+                source.resourceName(),
+                newForm,
+                source.customTags(),
+                source.idempotencyKey(),
+                source.submittedAt(),
+                from);
+        if (source.stackId() != null) {
+            updated.recordStackId(source.stackId());
+        }
+        updated.transitionTo(RequestStatus.UPDATE_IN_PROGRESS); // legal only from *_COMPLETE
+        requests.save(updated);
+        requests.appendEvent(id, from, RequestStatus.UPDATE_IN_PROGRESS,
+                "Image update to " + newImage + " requested by " + actorId, "PLATFORM", Instant.now());
+        // New key: the update is a distinct CFN operation from the create that made this stack.
+        workQueue.enqueueUpdate(id, UuidV7.generate().toString());
+        audit.record(actorId, actorEmail, "REQUEST_IMAGE_UPDATED", "REQUEST", id.toString(),
+                Map.of("image", newImage, "environment", source.environment().name()));
+        log.info("Request {} image update to {} enqueued", id, newImage);
+        return updated;
+    }
+
     @Transactional
     public Request approve(String actorId, UUID id) {
         Request request = get(id);

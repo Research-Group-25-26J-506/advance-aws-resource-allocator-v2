@@ -37,6 +37,8 @@ export default function RequestDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [deleteVisible, setDeleteVisible] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [updateVisible, setUpdateVisible] = useState(false);
+  const [newImage, setNewImage] = useState("");
   const [actionBusy, setActionBusy] = useState(false);
   const [flashes, setFlashes] = useState<FlashbarProps.MessageDefinition[]>([]);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -169,6 +171,12 @@ export default function RequestDetailPage() {
     envIndex >= 0 &&
     envIndex < envChain.length - 1;
   const nextEnv = promotable ? envChain[envIndex + 1] : "";
+  // In-place image update: only image-bearing (ecs) resources that are settled can be rolled to a
+  // new image. The current image comes from the stack's `Image` output so we can pre-fill it.
+  const currentImage = outputs.find((o) => o.key === "Image")?.value ?? "";
+  const updatable =
+    request.templateId.startsWith("ecs") &&
+    (request.status === "CREATE_COMPLETE" || request.status === "UPDATE_COMPLETE");
   const activeTab = searchParams.get("tab") ?? "overview";
 
   return (
@@ -182,6 +190,7 @@ export default function RequestDetailPage() {
             <ButtonDropdown
               loading={actionBusy}
               items={[
+                { id: "update-image", text: "Update image…", disabled: !updatable },
                 { id: "promote", text: `Promote to ${nextEnv}`, disabled: !promotable },
                 { id: "retry", text: "Retry", disabled: !retryable },
                 {
@@ -193,6 +202,10 @@ export default function RequestDetailPage() {
                 { id: "console", text: "View in AWS Console", external: true, disabled: !request.stackId },
               ]}
               onItemClick={(e) => {
+                if (e.detail.id === "update-image") {
+                  setNewImage(currentImage);
+                  setUpdateVisible(true);
+                }
                 if (e.detail.id === "reconcile") {
                   runAction("Re-driven — the pending operation is back in the worker queue", () =>
                     api.reconcileRequest(request.id).then(setRequest),
@@ -393,6 +406,58 @@ export default function RequestDetailPage() {
           ]}
         />
       </SpaceBetween>
+
+      <Modal
+        visible={updateVisible}
+        onDismiss={() => setUpdateVisible(false)}
+        header="Update image"
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={() => setUpdateVisible(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                loading={actionBusy}
+                disabled={!newImage.trim() || newImage.trim() === currentImage}
+                onClick={() => {
+                  setUpdateVisible(false);
+                  runAction("Image update started — CloudFormation is rolling the new image", () =>
+                    api.updateImage(request.id, newImage.trim()).then(setRequest),
+                  );
+                }}
+              >
+                Update
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween size="m">
+          <Box>
+            Rolls a new container image onto this service in place — the existing stack updates and
+            ECS restarts the tasks with the new image. No new resource is created. Promote the result
+            up to carry this image to the next environment.
+          </Box>
+          {currentImage && (
+            <div>
+              <Box variant="awsui-key-label">Current image</Box>
+              <Box variant="code" fontSize="body-s">
+                {currentImage}
+              </Box>
+            </div>
+          )}
+          <div>
+            <Box variant="awsui-key-label">New image URI</Box>
+            <Input
+              value={newImage}
+              onChange={(e) => setNewImage(e.detail.value)}
+              placeholder="123456789012.dkr.ecr.us-east-1.amazonaws.com/platform-images-dev:orders-a1b2c3d"
+            />
+          </div>
+        </SpaceBetween>
+      </Modal>
 
       <Modal
         visible={deleteVisible}

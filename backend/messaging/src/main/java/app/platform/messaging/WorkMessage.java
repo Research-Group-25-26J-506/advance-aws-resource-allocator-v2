@@ -7,6 +7,7 @@ public record WorkMessage(MessageType type, UUID requestId, String idempotencyKe
 
     public enum MessageType {
         PROVISION,
+        UPDATE,
         DEPLOY,
         DELETE,
         TEMPLATE_SYNC,

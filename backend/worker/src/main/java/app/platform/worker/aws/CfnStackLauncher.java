@@ -13,6 +13,7 @@ import software.amazon.awssdk.services.cloudformation.model.CreateStackRequest;
 import software.amazon.awssdk.services.cloudformation.model.OnFailure;
 import software.amazon.awssdk.services.cloudformation.model.Parameter;
 import software.amazon.awssdk.services.cloudformation.model.Tag;
+import software.amazon.awssdk.services.cloudformation.model.UpdateStackRequest;
 import software.amazon.awssdk.services.sts.StsClient;
 import software.amazon.awssdk.services.sts.model.Credentials;
 
@@ -56,6 +57,34 @@ public class CfnStackLauncher implements StackLauncher {
             builder.templateURL(launch.templateUrl());
         }
         return cfn.createStack(builder.build()).stackId();
+    }
+
+    @Override
+    public void updateStack(StackLaunch launch) {
+        CloudFormationClient cfn = clientFor(launch.executionRoleArn(), launch.region(), launch.clientRequestToken());
+        UpdateStackRequest.Builder builder = UpdateStackRequest.builder()
+                .stackName(launch.stackName())
+                .clientRequestToken(launch.clientRequestToken())
+                .capabilities(launch.capabilities().stream()
+                        .map(Capability::fromValue)
+                        .toList())
+                .parameters(launch.parameters().entrySet().stream()
+                        .map(e -> Parameter.builder()
+                                .parameterKey(e.getKey())
+                                .parameterValue(e.getValue())
+                                .build())
+                        .collect(Collectors.toList()))
+                .tags(launch.tags().stream()
+                        .map(t -> Tag.builder().key(t.key()).value(t.value()).build())
+                        .collect(Collectors.toList()));
+        if (launch.templateBody() != null) {
+            builder.templateBody(launch.templateBody());
+        } else {
+            builder.templateURL(launch.templateUrl());
+        }
+        // "No updates are to be performed" comes back as a ValidationError — the caller treats it as
+        // a no-op success rather than a failure, so re-submitting the same image never wedges.
+        cfn.updateStack(builder.build());
     }
 
     @Override

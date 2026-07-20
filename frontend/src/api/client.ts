@@ -138,6 +138,8 @@ export const api = {
   costForResource: (requestId: string) =>
     call<import("./types").ResourceCost>("GET", `/costs/resource/${requestId}`),
 
+  updateImage: (id: string, image: string) =>
+    call<PlatformRequest>("POST", `/requests/${id}/image`, { image }, uuidv7()),
   retryRequest: (id: string) => call<PlatformRequest>("POST", `/requests/${id}/retry`, undefined, uuidv7()),
   reconcileRequest: (id: string) => call<PlatformRequest>("POST", `/requests/${id}/reconcile`, undefined, uuidv7()),
   promoteRequest: (id: string) => call<PlatformRequest>("POST", `/requests/${id}/promote`, undefined, uuidv7()),

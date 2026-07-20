@@ -4,6 +4,7 @@ import app.platform.messaging.WorkMessage;
 import app.platform.templatesync.TemplateSyncHandler;
 import app.platform.worker.handler.DeleteHandler;
 import app.platform.worker.handler.ProvisionHandler;
+import app.platform.worker.handler.UpdateHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -21,14 +22,17 @@ public class WorkDispatcher {
     private static final Logger log = LoggerFactory.getLogger(WorkDispatcher.class);
 
     private final ProvisionHandler provisionHandler;
+    private final UpdateHandler updateHandler;
     private final DeleteHandler deleteHandler;
     private final TemplateSyncHandler templateSyncHandler;
 
     public WorkDispatcher(
             ProvisionHandler provisionHandler,
+            UpdateHandler updateHandler,
             DeleteHandler deleteHandler,
             TemplateSyncHandler templateSyncHandler) {
         this.provisionHandler = provisionHandler;
+        this.updateHandler = updateHandler;
         this.deleteHandler = deleteHandler;
         this.templateSyncHandler = templateSyncHandler;
     }
@@ -36,6 +40,7 @@ public class WorkDispatcher {
     public Outcome dispatch(WorkMessage work, Message raw) {
         return switch (work.type()) {
             case PROVISION -> provisionHandler.handle(work);
+            case UPDATE -> updateHandler.handle(work);
             case DELETE -> deleteHandler.handle(work);
             case TEMPLATE_SYNC -> {
                 templateSyncHandler.handle(work.requestId()); // records its own SYNC_FAILED on error

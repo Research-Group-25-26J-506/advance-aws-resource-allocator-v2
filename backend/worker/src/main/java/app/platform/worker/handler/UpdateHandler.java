@@ -19,21 +19,22 @@ import app.platform.worker.consume.WorkDispatcher.Outcome;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Instant;
-import java.util.List;
-import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 
 /**
- * Provision pipeline (3.04): load → render → tag → assume-role → CreateStack → persist.
- * Idempotent: skips anything not QUEUED; CFN ClientRequestToken = idempotency key.
+ * In-place update pipeline: load → render → tag → assume-role → UpdateStack → persist. Used to roll
+ * a new container image onto an existing ecs-service (and to carry that image up on a promote)
+ * WITHOUT tearing down and re-creating the stack. Same render+inject path as {@link ProvisionHandler}
+ * so environment scoping, per-group clusters and ALB priorities stay identical to the create.
+ * Idempotent: skips anything not UPDATE_IN_PROGRESS; CFN ClientRequestToken = the update's key.
  */
 @Component
-public class ProvisionHandler {
+public class UpdateHandler {
 
-    private static final Logger log = LoggerFactory.getLogger(ProvisionHandler.class);
+    private static final Logger log = LoggerFactory.getLogger(UpdateHandler.class);
 
     private final RequestRepository requests;
     private final TemplateRepository templates;
@@ -45,10 +46,10 @@ public class ProvisionHandler {
     private final SpringDataRepos.Teams teams;
     private final ExecRoleResolver execRoles;
     private final GroupClusterManager groupClusters;
-    private final Counter created;
+    private final Counter updated;
     private final Counter failed;
 
-    public ProvisionHandler(
+    public UpdateHandler(
             RequestRepository requests,
             TemplateRepository templates,
             TemplateStore templateStore,
@@ -70,19 +71,23 @@ public class ProvisionHandler {
         this.teams = teams;
         this.execRoles = execRoles;
         this.groupClusters = groupClusters;
-        this.created = metrics.counter("stack_create_initiated");
-        this.failed = metrics.counter("stack_create_failed");
+        this.updated = metrics.counter("stack_update_initiated");
+        this.failed = metrics.counter("stack_update_failed");
     }
 
     public Outcome handle(WorkMessage work) {
         Request request = requests.findById(work.requestId()).orElse(null);
         if (request == null) {
-            log.warn("Request {} vanished — dropping message", work.requestId());
+            log.warn("Request {} vanished — dropping update message", work.requestId());
             return Outcome.DONE;
         }
-        if (request.status() != RequestStatus.QUEUED) {
-            log.info("Request {} is {} not QUEUED — idempotent skip", request.id(), request.status());
+        if (request.status() != RequestStatus.UPDATE_IN_PROGRESS) {
+            log.info("Request {} is {} not UPDATE_IN_PROGRESS — idempotent skip", request.id(), request.status());
             return Outcome.DONE;
+        }
+        if (request.stackId() == null || request.stackId().isBlank()) {
+            // No stack to update — treat as a validation failure rather than a hung request.
+            return failRequest(request, new IllegalStateException("No stack to update"));
         }
         MDC.put("template_id", request.templateId());
         MDC.put("environment", request.environment().name());
@@ -96,22 +101,15 @@ public class ProvisionHandler {
             String cfnBody = templateStore.fetchBody(version.s3KeyBody());
 
             var rendered = renderer.render(manifest, request.formData(), cfnBody);
-            // Platform-injected parameter: templates declaring `Environment` get the request's
-            // environment (lowercased) so physical names are env-suffixed and promotions never
-            // collide (deltaalpha-...-dev vs -qa vs -stg vs -prod).
+            // Identical platform-injected parameters to the create path — see ProvisionHandler.
             if (cfnBody.matches("(?s).*\\n {2}Environment:\\s*\\n.*")) {
                 rendered.parameters().put("Environment", request.environment().name().toLowerCase());
             }
-            // Per-group compute isolation: templates that declare a `ClusterName` parameter run on
-            // the resource group's OWN ECS cluster (created on demand), never the platform cluster.
             if (cfnBody.matches("(?s).*\\n {2}ClusterName:\\s*\\n.*")) {
                 rendered.parameters().put(
                         "ClusterName",
                         groupClusters.ensureCluster(request.resourceName(), request.environment().name()));
             }
-            // Shared-ALB listener rules need a UNIQUE priority per (service, env), else promoting the
-            // same service to another environment collides on the ALB. Inject a stable value derived
-            // from serviceName+env (1000-40999) so the user never has to juggle priorities.
             if (cfnBody.matches("(?s).*\\n {2}AlbPriority:\\s*\\n.*")) {
                 Object svc = request.formData().get("serviceName");
                 String key = (svc == null ? request.resourceName() : svc.toString())
@@ -121,13 +119,12 @@ public class ProvisionHandler {
             Team team = teams.findById(request.teamId())
                     .map(t -> new Team(t.getId(), t.getName(), t.getCostCenter()))
                     .orElseThrow(() -> new IllegalStateException("team missing"));
-            var tags = tagPolicy.mandatoryTags(
-                    request, team, version, request.templateId());
+            var tags = tagPolicy.mandatoryTags(request, team, version, request.templateId());
 
-            String stackId = stackLauncher.createStack(new StackLauncher.StackLaunch(
-                    stackName(request),
+            stackLauncher.updateStack(new StackLauncher.StackLaunch(
+                    request.stackId(), // update the EXISTING stack, addressed by its stored id
                     rendered.body().length() <= TemplateRenderer.CFN_INLINE_BODY_LIMIT ? rendered.body() : null,
-                    null, // >51,200-byte bodies: upload to cfn-uploads + TemplateURL (adapter TODO)
+                    null,
                     rendered.parameters(),
                     tags,
                     manifest.cfnCapabilities(),
@@ -136,52 +133,49 @@ public class ProvisionHandler {
                     request.region(),
                     work.idempotencyKey()));
 
-            request.recordStackId(stackId);
-            request.transitionTo(RequestStatus.CREATE_IN_PROGRESS);
-            requests.save(request);
+            updated.increment();
             requests.appendEvent(
                     request.id(),
-                    RequestStatus.QUEUED,
-                    RequestStatus.CREATE_IN_PROGRESS,
-                    "CreateStack initiated: " + stackId,
+                    RequestStatus.UPDATE_IN_PROGRESS,
+                    RequestStatus.UPDATE_IN_PROGRESS,
+                    "UpdateStack initiated for " + request.stackId(),
                     "PLATFORM",
                     Instant.now());
-            created.increment();
-            log.info("Stack creation initiated for request {}: {}", request.id(), stackId);
-            return Outcome.DONE;
+            log.info("Stack update initiated for request {}: {}", request.id(), request.stackId());
+            return Outcome.DONE; // EventBridge listener (3.05) flips to UPDATE_COMPLETE
 
         } catch (Exception e) {
+            // "No updates are to be performed" — the rendered template is identical to what's live
+            // (e.g. the same image re-submitted). That's a success, not a failure: settle immediately.
+            if (e.getMessage() != null && e.getMessage().contains("No updates are to be performed")) {
+                request.transitionTo(RequestStatus.UPDATE_COMPLETE);
+                requests.save(request);
+                requests.appendEvent(
+                        request.id(),
+                        RequestStatus.UPDATE_IN_PROGRESS,
+                        RequestStatus.UPDATE_COMPLETE,
+                        "No changes to apply — already at the requested configuration",
+                        "PLATFORM",
+                        Instant.now());
+                log.info("Update for request {} was a no-op — settled UPDATE_COMPLETE", request.id());
+                return Outcome.DONE;
+            }
             return failRequest(request, e);
         }
     }
 
     private Outcome failRequest(Request request, Exception e) {
-        AwsErrorClassifier.Classification classification = errorClassifier.classify(e);
-        if (classification == AwsErrorClassifier.Classification.RETRYABLE) {
-            log.warn("Retryable AWS error for request {}: {}", request.id(), e.getMessage());
+        if (errorClassifier.classify(e) == AwsErrorClassifier.Classification.RETRYABLE) {
+            log.warn("Retryable AWS error updating request {}: {}", request.id(), e.getMessage());
             return Outcome.RETRYABLE;
         }
-        RequestStatus target = classification == AwsErrorClassifier.Classification.VALIDATION
-                ? RequestStatus.FAILED_VALIDATION
-                : RequestStatus.CREATE_FAILED;
         RequestStatus from = request.status();
         request.recordFailure(e.getMessage());
-        request.transitionTo(target);
+        request.transitionTo(RequestStatus.UPDATE_FAILED);
         requests.save(request);
-        requests.appendEvent(request.id(), from, target, e.getMessage(), "PLATFORM", Instant.now());
+        requests.appendEvent(request.id(), from, RequestStatus.UPDATE_FAILED, e.getMessage(), "PLATFORM", Instant.now());
         failed.increment();
-        log.error("Request {} failed terminally -> {}", request.id(), target, e);
+        log.error("Request {} update failed terminally -> UPDATE_FAILED", request.id(), e);
         return Outcome.DONE;
-    }
-
-    private String stackName(Request request) {
-        // Use the RANDOM tail of the UUIDv7, not its first 8 hex: those are a millisecond-timestamp
-        // prefix that only rolls over every ~65s, so two requests for the same template+resourceName
-        // within that window (classically a group restore, or two quick provisions) produced an
-        // IDENTICAL stack name and the second collided with "stack already exists". The last 8 hex
-        // are rand_b — still stable per request (so retries/idempotency are unaffected) but unique.
-        String compact = request.id().toString().replace("-", "");
-        String suffix = compact.substring(compact.length() - 8);
-        return "platform-%s-%s-%s".formatted(request.templateId(), request.resourceName(), suffix);
     }
 }

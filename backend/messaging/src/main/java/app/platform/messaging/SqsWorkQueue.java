@@ -32,6 +32,11 @@ public class SqsWorkQueue implements WorkQueue {
     }
 
     @Override
+    public void enqueueUpdate(UUID requestId, String idempotencyKey) {
+        send(new WorkMessage(WorkMessage.MessageType.UPDATE, requestId, idempotencyKey));
+    }
+
+    @Override
     public void enqueueDelete(UUID requestId, String idempotencyKey) {
         send(new WorkMessage(WorkMessage.MessageType.DELETE, requestId, idempotencyKey));
     }
