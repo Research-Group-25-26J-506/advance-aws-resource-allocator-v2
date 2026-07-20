@@ -185,6 +185,7 @@ export async function mockHandler(method: string, path: string, body?: unknown):
       { key: "DEV", amount: 29.26 },
     ];
   if (path.startsWith("/costs/resource/")) return { available: true, currency: "USD", monthToDate: 18.44 };
+  if (path.startsWith("/builds/branches")) return ["main", "develop", "release/1.0", "feature/orders"];
   if (method === "POST" && path === "/builds") {
     const tag = `svc-${crypto.randomUUID().slice(0, 8)}`;
     return { id: crypto.randomUUID(), imageTag: tag, imageUri: `111122223333.dkr.ecr.us-east-1.amazonaws.com/platform-svc-svc:${tag}` };
