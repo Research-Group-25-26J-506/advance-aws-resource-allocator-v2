@@ -4,6 +4,7 @@ import Alert from "@cloudscape-design/components/alert";
 import Autosuggest from "@cloudscape-design/components/autosuggest";
 import Box from "@cloudscape-design/components/box";
 import Button from "@cloudscape-design/components/button";
+import ButtonDropdown from "@cloudscape-design/components/button-dropdown";
 import Container from "@cloudscape-design/components/container";
 import ContentLayout from "@cloudscape-design/components/content-layout";
 import FormField from "@cloudscape-design/components/form-field";
@@ -188,23 +189,24 @@ export default function BuildsPage() {
             { id: "ref", header: "Ref", cell: (b) => b.ref },
             {
               id: "image",
-              header: "Image URI",
+              header: "Image (repo:tag)",
               cell: (b) => (
-                <SpaceBetween direction="horizontal" size="xs">
+                <SpaceBetween direction="horizontal" size="xs" alignItems="center">
                   <Box variant="code" fontSize="body-s">
-                    {b.imageUri}
+                    {/* registry host is boilerplate; show repo:tag, full URI on hover + copy */}
+                    <span title={b.imageUri}>{b.imageUri.replace(/^[^/]+\//, "")}</span>
                   </Box>
                   <Popover
                     dismissButton={false}
                     position="top"
                     size="small"
                     triggerType="custom"
-                    content="Copied to clipboard"
+                    content="Full image URI copied"
                   >
                     <Button
                       iconName="copy"
                       variant="inline-icon"
-                      ariaLabel="Copy image URI"
+                      ariaLabel="Copy full image URI"
                       onClick={() => navigator.clipboard?.writeText(b.imageUri)}
                     />
                   </Popover>
@@ -219,30 +221,36 @@ export default function BuildsPage() {
             { id: "started", header: "Started", cell: (b) => <span title={b.startedAt}>{relativeTime(b.startedAt)}</span> },
             {
               id: "actions",
-              header: "",
+              header: "Actions",
+              width: 110,
+              minWidth: 110,
               cell: (b) => (
-                <SpaceBetween direction="horizontal" size="xs">
-                  <Button
-                    iconName="refresh"
-                    disabled={b.status === "IN_PROGRESS"}
-                    loading={retryingId === b.id}
-                    onClick={() => retry(b)}
-                  >
-                    Retry
-                  </Button>
-                  <Button
-                    disabled={b.status !== "SUCCEEDED"}
-                    onClick={() =>
+                <ButtonDropdown
+                  variant="icon"
+                  ariaLabel={`Actions for ${b.serviceName}`}
+                  loading={retryingId === b.id}
+                  expandToViewport
+                  items={[
+                    { id: "retry", text: "Retry build", iconName: "refresh", disabled: b.status === "IN_PROGRESS" },
+                    {
+                      id: "deploy",
+                      text: "Deploy this image",
+                      iconName: "upload",
+                      disabled: b.status !== "SUCCEEDED",
+                    },
+                  ]}
+                  onItemClick={({ detail }) => {
+                    if (detail.id === "retry") {
+                      retry(b);
+                    } else {
                       navigate(
                         `/deployments?image=${encodeURIComponent(b.imageUri)}&serviceName=${encodeURIComponent(
                           b.serviceName,
                         )}`,
-                      )
+                      );
                     }
-                  >
-                    Deploy this image
-                  </Button>
-                </SpaceBetween>
+                  }}
+                />
               ),
             },
           ]}
