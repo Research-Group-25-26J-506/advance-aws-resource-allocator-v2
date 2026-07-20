@@ -109,6 +109,15 @@ public class ProvisionHandler {
                         "ClusterName",
                         groupClusters.ensureCluster(request.resourceName(), request.environment().name()));
             }
+            // Shared-ALB listener rules need a UNIQUE priority per (service, env), else promoting the
+            // same service to another environment collides on the ALB. Inject a stable value derived
+            // from serviceName+env (1000-40999) so the user never has to juggle priorities.
+            if (cfnBody.matches("(?s).*\\n {2}AlbPriority:\\s*\\n.*")) {
+                Object svc = request.formData().get("serviceName");
+                String key = (svc == null ? request.resourceName() : svc.toString())
+                        + ":" + request.environment().name();
+                rendered.parameters().put("AlbPriority", String.valueOf(1000 + Math.floorMod(key.hashCode(), 40000)));
+            }
             Team team = teams.findById(request.teamId())
                     .map(t -> new Team(t.getId(), t.getName(), t.getCostCenter()))
                     .orElseThrow(() -> new IllegalStateException("team missing"));

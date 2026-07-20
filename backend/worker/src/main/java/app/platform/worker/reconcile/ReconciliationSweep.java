@@ -1,7 +1,9 @@
 package app.platform.worker.reconcile;
 
+import app.platform.domain.port.WorkQueue;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -35,15 +37,56 @@ public class ReconciliationSweep {
 
     private final JdbcTemplate jdbc;
     private final CloudFormationClient cfn;
+    private final WorkQueue workQueue;
 
-    public ReconciliationSweep(JdbcTemplate jdbc, CloudFormationClient cfn) {
+    public ReconciliationSweep(JdbcTemplate jdbc, CloudFormationClient cfn, WorkQueue workQueue) {
         this.jdbc = jdbc;
         this.cfn = cfn;
+        this.workQueue = workQueue;
     }
 
     /** Every 5 minutes; only touches requests stuck > 15 minutes so it never races live work. */
     @Scheduled(fixedDelayString = "${platform.reconcile.interval-ms:300000}", initialDelay = 120000)
     public void sweep() {
+        reDriveQueued();
+        reconcileInProgress();
+    }
+
+    /**
+     * Re-drive requests stuck in QUEUED — their provision message was lost (worker replaced
+     * mid-flight during a deploy), and unlike *_IN_PROGRESS these never had a stack, so the CFN
+     * reconcile below can't recover them. This is what leaves a promote wedged on "Queued". Re-send
+     * the message (idempotent: ProvisionHandler skips anything not QUEUED) and bump updated_at so we
+     * don't re-drive it again for another grace window.
+     */
+    private void reDriveQueued() {
+        List<Map<String, Object>> queued;
+        try {
+            queued = jdbc.queryForList(
+                    "SELECT BIN_TO_UUID(id) AS id, idempotency_key FROM requests"
+                            + " WHERE status = 'QUEUED' AND updated_at < (NOW(6) - INTERVAL 10 MINUTE)"
+                            + " LIMIT 50");
+        } catch (Exception e) {
+            log.warn("Reconciliation sweep (queued) query failed", e);
+            return;
+        }
+        for (Map<String, Object> row : queued) {
+            String id = (String) row.get("id");
+            try {
+                workQueue.enqueueProvision(UUID.fromString(id), (String) row.get("idempotency_key"));
+                jdbc.update("UPDATE requests SET updated_at = NOW(6) WHERE id = UUID_TO_BIN(?)", id);
+                jdbc.update(
+                        "INSERT INTO request_events (request_id, from_status, to_status, reason, source, occurred_at)"
+                                + " VALUES (UUID_TO_BIN(?), 'QUEUED', 'QUEUED', ?, 'PLATFORM', NOW(6))",
+                        id, "Reconciliation sweep: re-enqueued lost provision message");
+                log.info("Reconciliation sweep: re-drove lost QUEUED provision {}", id);
+            } catch (Exception e) {
+                log.warn("Could not re-drive queued request {}", id, e);
+            }
+        }
+    }
+
+    private void reconcileInProgress() {
         List<Map<String, Object>> stuck;
         try {
             stuck = jdbc.queryForList(

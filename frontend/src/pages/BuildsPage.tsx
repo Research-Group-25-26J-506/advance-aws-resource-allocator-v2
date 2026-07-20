@@ -34,6 +34,7 @@ export default function BuildsPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [serviceFilter, setServiceFilter] = useState("__all__");
+  const [statusFilter, setStatusFilter] = useState("__all__");
   const [retryingId, setRetryingId] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
@@ -100,7 +101,11 @@ export default function BuildsPage() {
     () => [...new Set((builds ?? []).map((b) => b.serviceName))].sort(),
     [builds],
   );
-  const shown = (builds ?? []).filter((b) => serviceFilter === "__all__" || b.serviceName === serviceFilter);
+  const shown = (builds ?? []).filter(
+    (b) =>
+      (serviceFilter === "__all__" || b.serviceName === serviceFilter) &&
+      (statusFilter === "__all__" || b.status === statusFilter),
+  );
 
   return (
     <ContentLayout
@@ -162,6 +167,19 @@ export default function BuildsPage() {
               counter={builds ? `(${shown.length})` : undefined}
               actions={
                 <SpaceBetween direction="horizontal" size="xs">
+                  <Select
+                    selectedOption={{
+                      value: statusFilter,
+                      label: statusFilter === "__all__" ? "Any status" : statusFilter,
+                    }}
+                    options={[
+                      { value: "__all__", label: "Any status" },
+                      { value: "IN_PROGRESS", label: "In progress" },
+                      { value: "SUCCEEDED", label: "Succeeded" },
+                      { value: "FAILED", label: "Failed" },
+                    ]}
+                    onChange={(e) => setStatusFilter(e.detail.selectedOption.value ?? "__all__")}
+                  />
                   <Select
                     selectedOption={{
                       value: serviceFilter,

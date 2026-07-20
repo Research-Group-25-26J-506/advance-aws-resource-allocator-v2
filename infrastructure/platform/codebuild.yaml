@@ -71,6 +71,7 @@ Resources:
           - { Name: ECR_REPO, Value: !Sub "platform-images-${EnvironmentName}" }
           - { Name: REPO_URL, Value: "https://github.com/example/repo" }
           - { Name: REPO_REF, Value: "main" }
+          - { Name: SERVICE_NAME, Value: "app" }
           - { Name: IMAGE_TAG, Value: "unset" }
           - { Name: DOCKERFILE, Value: "Dockerfile" }
           - { Name: GIT_TOKEN, Value: "" }
@@ -80,10 +81,12 @@ Resources:
         Type: NO_SOURCE
         BuildSpec: |
           version: 0.2
+          env:
+            exported-variables:
+              - IMAGE_TAG
           phases:
             pre_build:
               commands:
-                - echo "Building $IMAGE_TAG from $REPO_URL@$REPO_REF"
                 - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
                 - |
                   if [ -n "$GIT_TOKEN" ]; then
@@ -92,6 +95,10 @@ Resources:
                     CLONE_URL="$REPO_URL"
                   fi
                 - git clone --depth 1 --branch "$REPO_REF" "$CLONE_URL" src
+                # Tag with the real commit SHA so the image maps to a known commit, not a random id.
+                # exported-variables sends the final IMAGE_TAG back so the platform records it.
+                - export IMAGE_TAG="${SERVICE_NAME}-$(git -C src rev-parse --short HEAD)"
+                - echo "Building $IMAGE_TAG from $REPO_URL@$REPO_REF"
             build:
               commands:
                 - cd src
