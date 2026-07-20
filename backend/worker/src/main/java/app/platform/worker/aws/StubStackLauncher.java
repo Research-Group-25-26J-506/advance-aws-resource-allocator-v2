@@ -66,6 +66,32 @@ public class StubStackLauncher implements StackLauncher {
     }
 
     @Override
+    public void updateStack(StackLaunch launch) {
+        log.info("[stub] UpdateStack {} with {} params", launch.stackName(), launch.parameters().size());
+        // Real AWS: the EventBridge listener flips UPDATE_IN_PROGRESS -> UPDATE_COMPLETE. The stack
+        // name here is the stored stack id, so resolve the request by stack id like delete does.
+        scheduler.schedule(() -> completeUpdate(launch.stackName()), 6, TimeUnit.SECONDS);
+    }
+
+    private void completeUpdate(String stackId) {
+        requests.findByStackId(stackId).ifPresent(request -> {
+            if (request.status() != RequestStatus.UPDATE_IN_PROGRESS) {
+                return;
+            }
+            request.transitionTo(RequestStatus.UPDATE_COMPLETE);
+            requests.save(request);
+            requests.appendEvent(
+                    request.id(),
+                    RequestStatus.UPDATE_IN_PROGRESS,
+                    RequestStatus.UPDATE_COMPLETE,
+                    "[stub] stack update simulated",
+                    "CLOUDFORMATION",
+                    Instant.now());
+            log.info("[stub] Request {} -> UPDATE_COMPLETE", request.id());
+        });
+    }
+
+    @Override
     public void deleteStack(String stackId, String executionRoleArn, Environment env, String region) {
         log.info("[stub] DeleteStack {}", stackId);
         // Real AWS: the EventBridge listener flips DELETE_IN_PROGRESS -> DELETE_COMPLETE.

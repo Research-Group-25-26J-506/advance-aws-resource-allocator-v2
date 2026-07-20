@@ -26,5 +26,12 @@ public interface StackLauncher {
     /** @return the created StackId */
     String createStack(StackLaunch launch);
 
+    /**
+     * In-place update of an existing stack ({@code launch.stackName()} carries the existing stack
+     * id/name). CloudFormation rolls the change (e.g. a new task-definition image) with no downtime.
+     * Throws if there is nothing to change — the caller treats "no updates" as an immediate success.
+     */
+    void updateStack(StackLaunch launch);
+
     void deleteStack(String stackId, String executionRoleArn, Environment environment, String region);
 }
