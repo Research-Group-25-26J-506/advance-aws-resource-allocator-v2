@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Alert from "@cloudscape-design/components/alert";
+import Autosuggest from "@cloudscape-design/components/autosuggest";
 import Box from "@cloudscape-design/components/box";
 import Button from "@cloudscape-design/components/button";
 import Container from "@cloudscape-design/components/container";
@@ -26,6 +27,8 @@ export default function BuildsPage() {
   const [ref, setRef] = useState("main");
   const [serviceName, setServiceName] = useState("");
   const [builds, setBuilds] = useState<BuildRun[] | null>(null);
+  const [branches, setBranches] = useState<string[]>([]);
+  const [loadingBranches, setLoadingBranches] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -38,6 +41,24 @@ export default function BuildsPage() {
     const timer = setInterval(refresh, 8000);
     return () => clearInterval(timer);
   }, [refresh]);
+
+  // Load the repo's branches once a valid GitHub URL is entered, so the ref field becomes a picker.
+  useEffect(() => {
+    const valid = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+/.test(repo.trim());
+    if (!valid) {
+      setBranches([]);
+      return;
+    }
+    setLoadingBranches(true);
+    const t = setTimeout(() => {
+      api
+        .listBranches(repo.trim())
+        .then(setBranches)
+        .catch(() => setBranches([]))
+        .finally(() => setLoadingBranches(false));
+    }, 400);
+    return () => clearTimeout(t);
+  }, [repo]);
 
   const trigger = async () => {
     setBusy(true);
@@ -83,8 +104,24 @@ export default function BuildsPage() {
                 placeholder="https://github.com/Research-Group-25-26J-506/pastry-orders-api"
               />
             </FormField>
-            <FormField label="Branch / ref">
-              <Input value={ref} onChange={(e) => setRef(e.detail.value)} />
+            <FormField
+              label="Branch / ref"
+              description={
+                branches.length > 0
+                  ? `${branches.length} branch${branches.length > 1 ? "es" : ""} loaded — pick one or type a tag/SHA`
+                  : "Enter the repo above to load its branches (public repos), or type a ref"
+              }
+            >
+              <Autosuggest
+                value={ref}
+                onChange={(e) => setRef(e.detail.value)}
+                options={branches.map((b) => ({ value: b }))}
+                statusType={loadingBranches ? "loading" : "finished"}
+                loadingText="Loading branches…"
+                placeholder="main"
+                enteredTextLabel={(v) => `Use "${v}"`}
+                empty="No branches loaded (private repo? just type a ref)"
+              />
             </FormField>
             <FormField label="Service name" constraintText="Names the image tag.">
               <Input value={serviceName} onChange={(e) => setServiceName(e.detail.value)} placeholder="pastry-orders-api" />

@@ -104,6 +104,7 @@ export const api = {
   deleteGroup: (name: string) => call<{ deleted: number }>("POST", `/groups/${name}/delete`, undefined, uuidv7()),
   restoreGroup: (name: string) => call<{ restored: number }>("POST", `/groups/${name}/restore`, undefined, uuidv7()),
   listBuilds: () => call<import("./types").BuildRun[]>("GET", "/builds"),
+  listBranches: (repo: string) => call<string[]>("GET", `/builds/branches?repo=${encodeURIComponent(repo)}`),
   triggerBuild: (repo: string, ref: string, serviceName: string) =>
     call<{ id: string; imageTag: string }>("POST", "/builds", { repo, ref, serviceName }, uuidv7()),
   listApps: () => call<{ logGroup: string; name: string; storedBytes: number }[]>("GET", "/apps"),

@@ -421,6 +421,20 @@ paths:
                   currency: { type: string }
                   monthToDate: { type: number }
 
+  /builds/branches:
+    get:
+      tags: [builds]
+      operationId: listBranches
+      summary: Branches of an allowlisted GitHub repo (public repos; empty for private)
+      parameters:
+        - { name: repo, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Branch names
+          content:
+            application/json:
+              schema: { type: array, items: { type: string } }
+
   /builds:
     get:
       tags: [builds]
