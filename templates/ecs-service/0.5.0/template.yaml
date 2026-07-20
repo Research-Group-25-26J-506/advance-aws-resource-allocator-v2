@@ -1,0 +1,259 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Platform-managed ECS service. Runs a container image on the RESOURCE GROUP's own Fargate cluster
+  (platform-grp-<group>-<env>), isolated from the platform control-plane cluster, in the private app
+  subnets. Optionally attaches to the shared ALB on a path (reachable via the platform URL) and
+  optionally forwards its logs to S3 via Firehose. Physical names are environment-suffixed.
+
+Parameters:
+  Environment:
+    Type: String
+    Description: Injected by the platform (dev/qa/stg/prod) - suffixes physical names
+    Default: dev
+  ClusterName:
+    Type: String
+    Default: ""
+    Description: >-
+      The resource group's ECS cluster, injected by the platform (platform-grp-<group>-<env>).
+      Left empty it falls back to the shared platform cluster (legacy behaviour).
+  ServiceName:
+    Type: String
+    AllowedPattern: "^[a-z][a-z0-9-]{1,40}$"
+  Image:
+    Type: String
+    Description: Full image URI, e.g. 1234.dkr.ecr.us-east-1.amazonaws.com/my-app:v1
+  ContainerPort:
+    Type: Number
+    Default: 8080
+    MinValue: 1
+    MaxValue: 65535
+  Cpu:
+    Type: String
+    AllowedValues: ["256", "512", "1024"]
+    Default: "256"
+  Memory:
+    Type: String
+    AllowedValues: ["512", "1024", "2048"]
+    Default: "512"
+  DesiredCount:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    MaxValue: 5
+  AttachAlb:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+    Description: Reach the service through the shared platform ALB on the path below
+  AlbPath:
+    Type: String
+    Default: /
+    Description: >-
+      Listener path routed to this service, e.g. /orders/*. Left at the default "/" the service is
+      served at /<serviceName>/* so it never collides with the platform's own UI at the root.
+  AlbPriority:
+    Type: Number
+    Default: 100
+    MinValue: 1
+    MaxValue: 50000
+    Description: Unique listener rule priority - each ALB-attached service needs a distinct number
+  HealthCheckPath:
+    Type: String
+    Default: /
+  ForwardLogsToS3:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+    Description: Stream this service's logs to the platform logs bucket (Firehose)
+  # Platform wiring (SSM-resolved; defaults target dev)
+  AppSubnetsParam:
+    Type: AWS::SSM::Parameter::Value<List<String>>
+    Default: /platform/dev/network/app-subnets
+
+Conditions:
+  UseAlb: !Equals [!Ref AttachAlb, "true"]
+  ShipLogs: !Equals [!Ref ForwardLogsToS3, "true"]
+  HasGroupCluster: !Not [!Equals [!Ref ClusterName, ""]]
+  # A bare "/" would hijack the platform root, so translate it to a per-service path instead.
+  DefaultAlbPath: !Equals [!Ref AlbPath, "/"]
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /platform/apps/${ServiceName}-${Environment}
+      RetentionInDays: 30
+
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub platform-app-${ServiceName}-${Environment}-exec
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  TaskDef:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub platform-app-${ServiceName}-${Environment}
+      RequiresCompatibilities: [FARGATE]
+      Cpu: !Ref Cpu
+      Memory: !Ref Memory
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+      ContainerDefinitions:
+        - Name: app
+          Image: !Ref Image
+          Essential: true
+          PortMappings: [{ ContainerPort: !Ref ContainerPort }]
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: app
+
+  # ---------------------------------------------------- ALB attachment (optional)
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Condition: UseAlb
+    Properties:
+      Name: !Sub app-${ServiceName}-${Environment}
+      VpcId: "{{resolve:ssm:/platform/dev/network/vpc-id}}"
+      Port: !Ref ContainerPort
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckPath: !Ref HealthCheckPath
+      HealthCheckIntervalSeconds: 30
+      TargetGroupAttributes:
+        - { Key: deregistration_delay.timeout_seconds, Value: "15" }
+
+  ListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Condition: UseAlb
+    Properties:
+      ListenerArn: "{{resolve:ssm:/platform/dev/http-listener-arn}}"
+      Priority: !Ref AlbPriority
+      Conditions:
+        - Field: path-pattern
+          PathPatternConfig:
+            Values:
+              - !If
+                - DefaultAlbPath
+                - !Sub "/${ServiceName}/*"
+                - !Ref AlbPath
+      Actions:
+        - { Type: forward, TargetGroupArn: !Ref TargetGroup }
+
+  Service:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub app-${ServiceName}-${Environment}
+      # The group's own cluster when injected, else the shared platform cluster (legacy).
+      Cluster: !If
+        - HasGroupCluster
+        - !Ref ClusterName
+        - "{{resolve:ssm:/platform/dev/ecs-cluster}}"
+      TaskDefinition: !Ref TaskDef
+      LaunchType: FARGATE
+      DesiredCount: !Ref DesiredCount
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker: { Enable: true, Rollback: true }
+      HealthCheckGracePeriodSeconds: !If [UseAlb, 60, !Ref "AWS::NoValue"]
+      LoadBalancers: !If
+        - UseAlb
+        - - { ContainerName: app, ContainerPort: !Ref ContainerPort, TargetGroupArn: !Ref TargetGroup }
+        - !Ref "AWS::NoValue"
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref AppSubnetsParam
+          SecurityGroups:
+            - "{{resolve:ssm:/platform/dev/network/sg-ecs}}"
+
+  # ------------------------------------------------ Logs -> S3 (optional, Firehose)
+  FirehoseRole:
+    Type: AWS::IAM::Role
+    Condition: ShipLogs
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: firehose.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: write-logs-bucket
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [s3:PutObject, s3:GetBucketLocation, s3:ListBucket]
+                Resource:
+                  - !Sub arn:aws:s3:::platform-observability-loki-${AWS::AccountId}-dev
+                  - !Sub arn:aws:s3:::platform-observability-loki-${AWS::AccountId}-dev/*
+
+  LogStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Condition: ShipLogs
+    Properties:
+      DeliveryStreamName: !Sub app-${ServiceName}-${Environment}-logs
+      S3DestinationConfiguration:
+        BucketARN: !Sub arn:aws:s3:::platform-observability-loki-${AWS::AccountId}-dev
+        Prefix: !Sub app-logs/${ServiceName}-${Environment}/
+        RoleARN: !GetAtt FirehoseRole.Arn
+        BufferingHints: { IntervalInSeconds: 300, SizeInMBs: 5 }
+        CompressionFormat: GZIP
+
+  LogsToFirehoseRole:
+    Type: AWS::IAM::Role
+    Condition: ShipLogs
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub logs.${AWS::Region}.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: put-to-firehose
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: firehose:PutRecord
+                Resource: !GetAtt LogStream.Arn
+
+  LogSubscription:
+    Type: AWS::Logs::SubscriptionFilter
+    Condition: ShipLogs
+    Properties:
+      LogGroupName: !Ref LogGroup
+      FilterPattern: ""
+      DestinationArn: !GetAtt LogStream.Arn
+      RoleArn: !GetAtt LogsToFirehoseRole.Arn
+
+Outputs:
+  ServiceArn: { Value: !Ref Service }
+  Cluster:
+    Description: The ECS cluster this service runs on
+    Value: !If [HasGroupCluster, !Ref ClusterName, "{{resolve:ssm:/platform/dev/ecs-cluster}}"]
+  ServiceUrl:
+    Condition: UseAlb
+    Value: !Sub
+      - "https://{{resolve:ssm:/platform/dev/cdn-domain}}${Path}"
+      - Path: !If
+          - DefaultAlbPath
+          - !Sub "/${ServiceName}/"
+          - !Ref AlbPath
+  LogGroupName: { Value: !Ref LogGroup }
+  LogsBucketPrefix:
+    Condition: ShipLogs
+    Value: !Sub s3://platform-observability-loki-${AWS::AccountId}-dev/app-logs/${ServiceName}-${Environment}/
