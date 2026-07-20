@@ -82,6 +82,7 @@ jobs:
           deploy iam infrastructure/platform/iam.yaml
           deploy observability infrastructure/platform/observability.yaml
           deploy cdn infrastructure/platform/cdn.yaml
+          deploy codebuild infrastructure/platform/codebuild.yaml
 
       - name: Run DB migrations (dedicated pre-deploy task, new image)
         run: |
